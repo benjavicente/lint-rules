@@ -1,0 +1,9 @@
+{
+  "include": ["src/**/*.ts"],
+  "compilerOptions": {
+    "strict": true,
+    "types": ["node"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext"
+  }
+}

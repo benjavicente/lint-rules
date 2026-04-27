@@ -1,0 +1,43 @@
+{
+  "name": "@benjavicente/lint-angular",
+  "version": "0.0.1",
+  "description": "Oxlint/ESLint-compatible rules for Angular.",
+  "keywords": [
+    "angular",
+    "eslint",
+    "oxlint"
+  ],
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "fmt": "vp fmt src",
+    "lint": "vp lint src",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@oxlint/plugins": "^1.61.0"
+  },
+  "devDependencies": {
+    "@types/estree": "^1.0.8",
+    "oxlint-vitest-rule-tester": "workspace:*",
+    "typescript": "^6.0.3",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  }
+}

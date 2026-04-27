@@ -1,0 +1,43 @@
+{
+  "name": "oxlint-vitest-rule-tester",
+  "version": "0.0.1",
+  "description": "Vitest tester for Oxlint plugins",
+  "keywords": [
+    "oxlint",
+    "vitest"
+  ],
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "fmt": "vp fmt src",
+    "lint": "vp lint src"
+  },
+  "devDependencies": {
+    "@oxlint/plugins": "^1.61.0",
+    "@types/node": "^22.15.3",
+    "typescript": "^6.0.3",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@oxlint/plugins": ">=1.61.0",
+    "oxlint": ">=1.61.0",
+    "vitest": ">=2.0.0"
+  }
+}
