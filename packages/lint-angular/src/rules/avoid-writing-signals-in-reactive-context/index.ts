@@ -2,6 +2,7 @@ import { defineRule } from "@oxlint/plugins";
 import type { Context, Rule } from "@oxlint/plugins";
 import { getPropertyName } from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
+import { findNearestBindingIdentifier, isShadowedIdentifier } from "../../utilities/scope.js";
 
 const SIGNAL_WRITE_METHODS = new Set(["set", "update", "mutate"]);
 const KNOWN_SIGNAL_CREATION_FUNCTIONS = new Set(["signal", "model", "linkedSignal"]);
@@ -15,6 +16,7 @@ interface RuleOptions {
 }
 
 function isAngularCoreNamespaceMember(
+  context: Context,
   node: AnyNode | null | undefined,
   angularNamespaces: Set<string>,
   memberName: string,
@@ -23,11 +25,13 @@ function isAngularCoreNamespaceMember(
     node?.type === "MemberExpression" &&
     node.object?.type === "Identifier" &&
     angularNamespaces.has(node.object.name) &&
+    !isShadowedIdentifier(context, node.object) &&
     getPropertyName(node.property) === memberName
   );
 }
 
 function isSignalCreatorCall(
+  context: Context,
   node: AnyNode | null | undefined,
   signalCreatorNames: Set<string>,
   angularNamespaces: Set<string>,
@@ -35,26 +39,32 @@ function isSignalCreatorCall(
   if (node?.type !== "CallExpression") return false;
   const callee = node.callee;
   return (
-    (callee?.type === "Identifier" && signalCreatorNames.has(callee.name)) ||
+    (callee?.type === "Identifier" &&
+      signalCreatorNames.has(callee.name) &&
+      !isShadowedIdentifier(context, callee)) ||
     [...KNOWN_SIGNAL_CREATION_FUNCTIONS].some((name) =>
-      isAngularCoreNamespaceMember(callee, angularNamespaces, name),
+      isAngularCoreNamespaceMember(context, callee, angularNamespaces, name),
     )
   );
 }
 
 function isEffectCall(
+  context: Context,
   node: AnyNode,
   effectNames: Set<string>,
   angularNamespaces: Set<string>,
 ): boolean {
   const callee = node.callee;
   return (
-    (callee?.type === "Identifier" && effectNames.has(callee.name)) ||
-    isAngularCoreNamespaceMember(callee, angularNamespaces, "effect")
+    (callee?.type === "Identifier" &&
+      effectNames.has(callee.name) &&
+      !isShadowedIdentifier(context, callee)) ||
+    isAngularCoreNamespaceMember(context, callee, angularNamespaces, "effect")
   );
 }
 
 function isReactiveCreatorCall(
+  context: Context,
   node: AnyNode,
   creatorNames: Set<string>,
   angularNamespaces: Set<string>,
@@ -62,18 +72,27 @@ function isReactiveCreatorCall(
 ): boolean {
   const callee = node.callee;
   return (
-    (callee?.type === "Identifier" && creatorNames.has(callee.name)) ||
-    isAngularCoreNamespaceMember(callee, angularNamespaces, angularMemberName)
+    (callee?.type === "Identifier" &&
+      creatorNames.has(callee.name) &&
+      !isShadowedIdentifier(context, callee)) ||
+    isAngularCoreNamespaceMember(context, callee, angularNamespaces, angularMemberName)
   );
 }
 
 function isKnownSignalObject(
+  context: Context,
   objectNode: AnyNode | null | undefined,
-  signalVariables: Set<string>,
+  signalVariableBindings: Map<string, Set<AnyNode>>,
   classSignalProperties: Set<string>,
 ): boolean {
   if (!objectNode) return false;
-  if (objectNode.type === "Identifier") return signalVariables.has(objectNode.name);
+  if (objectNode.type === "Identifier") {
+    const trackedBindings = signalVariableBindings.get(objectNode.name);
+    if (!trackedBindings) return false;
+
+    const nearestBinding = findNearestBindingIdentifier(context, objectNode);
+    return !!nearestBinding && trackedBindings.has(nearestBinding);
+  }
 
   return (
     objectNode.type === "MemberExpression" &&
@@ -83,22 +102,31 @@ function isKnownSignalObject(
   );
 }
 
+const FUNCTION_NODE_TYPES = new Set([
+  "ArrowFunctionExpression",
+  "FunctionExpression",
+  "FunctionDeclaration",
+]);
+
 function visitNodes(
   node: AnyNode | AnyNode[] | null | undefined,
   visitor: (node: AnyNode) => void,
+  skipFunctionBodies = false,
 ): void {
   if (!node) return;
   if (Array.isArray(node)) {
-    for (const item of node) visitNodes(item, visitor);
+    for (const item of node) visitNodes(item, visitor, skipFunctionBodies);
     return;
   }
+
+  if (skipFunctionBodies && FUNCTION_NODE_TYPES.has(node.type)) return;
 
   visitor(node);
 
   for (const [key, value] of Object.entries(node)) {
     if (key === "parent") continue;
     if (!value || typeof value !== "object") continue;
-    visitNodes(value as AnyNode | AnyNode[], visitor);
+    visitNodes(value as AnyNode | AnyNode[], visitor, skipFunctionBodies);
   }
 }
 
@@ -138,7 +166,7 @@ const avoidWritingSignalsInReactiveContext = defineRule({
     const linkedSignalNames = new Set<string>();
     const signalCreatorNames = new Set<string>();
     const angularNamespaces = new Set<string>();
-    const signalVariables = new Set<string>();
+    const signalVariableBindings = new Map<string, Set<AnyNode>>();
     const classSignalProperties = new Set<string>();
 
     return {
@@ -148,7 +176,7 @@ const avoidWritingSignalsInReactiveContext = defineRule({
         linkedSignalNames.clear();
         signalCreatorNames.clear();
         angularNamespaces.clear();
-        signalVariables.clear();
+        signalVariableBindings.clear();
         classSignalProperties.clear();
       },
 
@@ -177,14 +205,20 @@ const avoidWritingSignalsInReactiveContext = defineRule({
       VariableDeclarator(node) {
         const declarator = node as AnyNode;
         if (declarator.id?.type !== "Identifier") return;
-        if (!isSignalCreatorCall(declarator.init, signalCreatorNames, angularNamespaces)) return;
-        signalVariables.add(declarator.id.name);
+        if (!isSignalCreatorCall(context, declarator.init, signalCreatorNames, angularNamespaces)) {
+          return;
+        }
+        const bindings = signalVariableBindings.get(declarator.id.name) ?? new Set<AnyNode>();
+        bindings.add(declarator.id);
+        signalVariableBindings.set(declarator.id.name, bindings);
       },
 
       "PropertyDefinition, FieldDefinition, AccessorProperty"(node) {
         const property = node as AnyNode;
         if (property.key?.type !== "Identifier") return;
-        if (!isSignalCreatorCall(property.value, signalCreatorNames, angularNamespaces)) return;
+        if (!isSignalCreatorCall(context, property.value, signalCreatorNames, angularNamespaces)) {
+          return;
+        }
         classSignalProperties.add(property.key.name);
       },
 
@@ -196,7 +230,7 @@ const avoidWritingSignalsInReactiveContext = defineRule({
         const callNode = node as AnyNode;
         const callbackCandidates: { callback: AnyNode; contextName: string }[] = [];
 
-        if (!allowEffects && isEffectCall(callNode, effectNames, angularNamespaces)) {
+        if (!allowEffects && isEffectCall(context, callNode, effectNames, angularNamespaces)) {
           const callback = callNode.arguments?.[0] as AnyNode | undefined;
           if (
             callback?.type === "ArrowFunctionExpression" ||
@@ -208,7 +242,13 @@ const avoidWritingSignalsInReactiveContext = defineRule({
 
         if (
           !allowComputedAndLinkedSignals &&
-          isReactiveCreatorCall(callNode, computedNames, angularNamespaces, COMPUTED_CREATOR_NAME)
+          isReactiveCreatorCall(
+            context,
+            callNode,
+            computedNames,
+            angularNamespaces,
+            COMPUTED_CREATOR_NAME,
+          )
         ) {
           const callback = callNode.arguments?.[0] as AnyNode | undefined;
           if (
@@ -222,6 +262,7 @@ const avoidWritingSignalsInReactiveContext = defineRule({
         if (
           !allowComputedAndLinkedSignals &&
           isReactiveCreatorCall(
+            context,
             callNode,
             linkedSignalNames,
             angularNamespaces,
@@ -258,31 +299,44 @@ const avoidWritingSignalsInReactiveContext = defineRule({
         }
 
         for (const { callback, contextName } of callbackCandidates) {
-          visitNodes(callback.body as AnyNode, (current) => {
-            if (current.type !== "CallExpression") return;
-            const callee = current.callee;
-            if (callee?.type !== "MemberExpression") return;
+          visitNodes(
+            callback.body as AnyNode,
+            (current) => {
+              if (current.type !== "CallExpression") return;
+              const callee = current.callee;
+              if (callee?.type !== "MemberExpression") return;
 
-            const methodName = getPropertyName(callee.property);
-            if (!methodName || !SIGNAL_WRITE_METHODS.has(methodName)) return;
-            if (!isKnownSignalObject(callee.object, signalVariables, classSignalProperties)) return;
+              const methodName = getPropertyName(callee.property);
+              if (!methodName || !SIGNAL_WRITE_METHODS.has(methodName)) return;
+              if (
+                !isKnownSignalObject(
+                  context,
+                  callee.object,
+                  signalVariableBindings,
+                  classSignalProperties,
+                )
+              ) {
+                return;
+              }
 
-            context.report({
-              node: callee.property ?? callee,
-              messageId: "avoidSignalWriteInReactiveContext",
-              data: { contextName },
-            });
-          });
+              context.report({
+                node: callee.property ?? callee,
+                messageId: "avoidSignalWriteInReactiveContext",
+                data: { contextName },
+              });
+            },
+            true,
+          );
         }
       },
 
-      "Program:exit"() {
+      after() {
         effectNames.clear();
         computedNames.clear();
         linkedSignalNames.clear();
         signalCreatorNames.clear();
         angularNamespaces.clear();
-        signalVariables.clear();
+        signalVariableBindings.clear();
         classSignalProperties.clear();
       },
     };

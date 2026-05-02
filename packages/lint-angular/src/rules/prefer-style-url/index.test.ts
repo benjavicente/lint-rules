@@ -9,6 +9,7 @@ await run({
     'import { Component } from "@angular/core"; @Component({ styleUrls: ["./a.css", "./b.css"] }) class C {}',
     'import { Component } from "@angular/core"; @Component({ styleUrls: styles }) class C {}',
     'import { Directive } from "@angular/core"; @Directive({ styleUrls: ["./cmp.css"] }) class C {}',
+    'import { Component } from "not-angular"; @Component({ styleUrls: ["./cmp.css"] }) class C {}',
     'const metadata = { styleUrls: ["./cmp.css"] };',
   ],
   invalid: [

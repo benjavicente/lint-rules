@@ -1,13 +1,20 @@
 import { defineRule } from "@oxlint/plugins";
 import type { Context, Rule } from "@oxlint/plugins";
-import { getDecoratorName, getPropertyName } from "../../utilities/ast.js";
+import { getPropertyName } from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
+import { addAngularCoreDecoratorImport, isAngularCoreDecorator } from "../../utilities/angular.js";
+import type { AngularCoreDecoratorImports } from "../../utilities/angular.js";
 
 const ALLOWED_PROVIDED_IN_VALUES = new Set(["root", "platform"]);
+const INJECTABLE_DECORATORS = new Set(["Injectable"]);
 
-function getInjectableMetadata(node: AnyNode): AnyNode | null {
+function getInjectableMetadata(
+  context: Context,
+  node: AnyNode,
+  decoratorImports: AngularCoreDecoratorImports,
+): AnyNode | null {
   if (node.type !== "Decorator") return null;
-  if (getDecoratorName(node) !== "Injectable") return null;
+  if (!isAngularCoreDecorator(context, node, decoratorImports)) return null;
 
   const expression = node.expression;
   if (expression?.type !== "CallExpression") return null;
@@ -44,14 +51,37 @@ const restrictInjectableProvidedIn = defineRule({
     schema: [],
     messages: {
       disallowedProvidedIn:
-        "@Injectable providedIn should be 'root' or 'platform', not {{actual}}.",
+        "@Injectable providedIn should be the literal 'root' or 'platform', not {{actual}}.",
     },
   },
 
   createOnce(context: Context) {
+    const decoratorImports: AngularCoreDecoratorImports = {
+      decoratorNames: INJECTABLE_DECORATORS,
+      decoratorLocalNames: new Set<string>(),
+      angularNamespaces: new Set<string>(),
+    };
+
     return {
+      before() {
+        decoratorImports.decoratorLocalNames.clear();
+        decoratorImports.angularNamespaces.clear();
+      },
+
+      ImportDeclaration(node) {
+        if (node.source?.value !== "@angular/core") return;
+
+        for (const specifier of node.specifiers ?? []) {
+          addAngularCoreDecoratorImport(
+            specifier as AnyNode,
+            INJECTABLE_DECORATORS,
+            decoratorImports,
+          );
+        }
+      },
+
       Decorator(node) {
-        const metadata = getInjectableMetadata(node as AnyNode);
+        const metadata = getInjectableMetadata(context, node as AnyNode, decoratorImports);
         if (!metadata) return;
 
         const providedInProperty = getProvidedInProperty(metadata);

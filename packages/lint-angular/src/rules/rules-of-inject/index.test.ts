@@ -58,6 +58,22 @@ await run({
     'import { Pipe, inject } from "@angular/core"; @Pipe({ name: "x" }) class C { service = inject(Service); }',
     'import { NgModule, inject } from "@angular/core"; @NgModule({}) class C { service = inject(Service); }',
     'import * as ng from "@angular/core"; @ng.Component({}) class C { service = ng.inject(Service); }',
+    'import { Component } from "@angular/core"; import { toSignal } from "@angular/core/rxjs-interop"; @Component({}) class C { value = toSignal(this.value$); }',
+    'import { Component } from "@angular/core"; import * as rxjsInterop from "@angular/core/rxjs-interop"; @Component({}) class C { value = rxjsInterop.toSignal(this.value$); }',
+    'import { Component } from "@angular/core"; import { toSignal } from "@angular/core/rxjs-interop"; @Component({}) class C { constructor() { this.value = toSignal(this.value$); } }',
+    'import { Component, effect } from "@angular/core"; @Component({}) class C { constructor() { effect(() => this.sync()); } }',
+    'import { Component, afterNextRender } from "@angular/core"; @Component({}) class C { ready = afterNextRender(() => this.sync()); }',
+    'import { Component } from "@angular/core"; import { toObservable } from "@angular/core/rxjs-interop"; @Component({}) class C { value$ = toObservable(this.value); }',
+    'import { Component } from "@angular/core"; import { httpResource } from "@angular/common/http"; @Component({}) class C { user = httpResource(() => "/api/user"); text = httpResource.text(() => "/api/user"); }',
+    'import { Component, signal } from "@angular/core"; import { form } from "@angular/forms/signals"; @Component({}) class C { model = signal({ name: "" }); form = form(this.model); }',
+    'import { effect } from "@angular/core"; function load(effect: () => void) { effect(); }',
+    'import { toSignal } from "@angular/core/rxjs-interop"; function load(toSignal: () => void) { toSignal(); }',
+    'import { httpResource } from "@angular/common/http"; function load(httpResource: { text(): string }) { return httpResource.text(); }',
+    'import * as core from "@angular/core"; function load(core: { effect(): void }) { core.effect(); }',
+    {
+      code: "function load(inject: () => void) { inject(); }",
+      options: [{ checkUnimportedInject: true }],
+    },
   ],
   invalid: [
     {
@@ -146,6 +162,70 @@ await run({
     {
       code: 'import { storage } from "@signality/core"; function load() { return storage("k", 123); }',
       options: [{ runsInInjectionContext: [{ from: "@signality/core", imports: "all" }] }],
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { toSignal } from "@angular/core/rxjs-interop"; const value = toSignal(value$);',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { toSignal } from "@angular/core/rxjs-interop"; function load() { return toSignal(value$); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import * as rxjsInterop from "@angular/core/rxjs-interop"; function load() { return rxjsInterop.toSignal(value$); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { effect } from "@angular/core"; function load() { effect(() => sync()); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { afterEveryRender } from "@angular/core"; function load() { afterEveryRender(() => sync()); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { afterNextRender } from "@angular/core"; function load() { afterNextRender(() => sync()); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { afterRenderEffect } from "@angular/core"; function load() { afterRenderEffect(() => sync()); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { assertInInjectionContext } from "@angular/core"; function load() { assertInInjectionContext(load); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { resource } from "@angular/core"; function load() { return resource({ loader: () => Promise.resolve(1) }); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import * as core from "@angular/core"; function load() { core.effect(() => sync()); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { toObservable } from "@angular/core/rxjs-interop"; function load() { return toObservable(value); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { rxResource } from "@angular/core/rxjs-interop"; function load() { return rxResource({ stream: () => source$ }); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { httpResource } from "@angular/common/http"; function load() { return httpResource(() => "/api/user"); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { httpResource } from "@angular/common/http"; function load() { return httpResource.text(() => "/api/user"); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import * as http from "@angular/common/http"; function load() { return http.httpResource.text(() => "/api/user"); }',
+      errors: ["disallowedInject"],
+    },
+    {
+      code: 'import { form } from "@angular/forms/signals"; function load(model) { return form(model); }',
       errors: ["disallowedInject"],
     },
   ],

@@ -14,6 +14,8 @@ await run({
     "class Foo { constructor(private readonly value: string) {} }",
     "class Foo { private ['value'] = 1; }",
     "class Foo { private ['value']() {} }",
+    'class Foo { @ViewChild("input") private input!: ElementRef; }',
+    "class Foo { @Decorator() private method() {} }",
   ],
   invalid: [
     {
@@ -44,6 +46,16 @@ await run({
     },
     {
       code: "class Foo { private value = 1; method() { return other.value; } }",
+      errors: ["preferPrivateElements"],
+      output: null,
+    },
+    {
+      code: "class Foo { private value = 1; method() { return () => this.value; } }",
+      errors: ["preferPrivateElements"],
+      output: null,
+    },
+    {
+      code: 'class Foo { private value = 1; method() { return this["value"]; } }',
       errors: ["preferPrivateElements"],
       output: null,
     },

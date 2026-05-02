@@ -39,6 +39,7 @@ function getPrivateTarget(element: AnyNode): PrivateTarget | null {
 
   if (element.accessibility !== "private") return null;
   if (element.computed) return null;
+  if (Array.isArray(element.decorators) && element.decorators.length > 0) return null;
   if (element.type === "MethodDefinition" && element.kind === "constructor") return null;
 
   const name = getPropertyName(element.key);

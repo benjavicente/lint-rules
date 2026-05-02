@@ -10,6 +10,15 @@ This rule focuses on three concrete NgModule patterns:
 - `*.forRoot(...)` provider registration (recommend `provideX(...)` functions)
 - `RouterModule.forChild(routes)` route setup (recommend `provideRouter(...)` and lazy route entries such as `loadComponent: () => import('./components/auth/login-page')`)
 
+It also emits more specific guidance for common migration cases:
+
+- `RouterModule.forRoot(routes)` -> `provideRouter(routes)` ([docs](https://angular.dev/guide/routing/define-routes))
+- `StoreModule.forRoot(...)` -> `provideStore(...)`
+- `StoreModule.forFeature(...)` -> `provideState(...)`
+- `EffectsModule.forRoot(...)` / `EffectsModule.forFeature(...)` -> `provideEffects(...)`
+- `StoreDevtoolsModule.instrument(...)` -> `provideStoreDevtools(...)`
+- `StoreRouterConnectingModule.forRoot(...)` -> `provideRouterStore(...)`
+
 Options (booleans):
 
 - `allowForGrouping` (default: `true`)

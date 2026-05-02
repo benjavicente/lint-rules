@@ -19,6 +19,9 @@ await run({
       code: 'import { Injector, inject, runInInjectionContext } from "@angular/core"; const injector = inject(Injector); runInInjectionContext(injector, () => work());',
       options: [{ disallowInjectInjector: false, disallowRunInInjectionContext: false }],
     },
+    'import { Injector, inject } from "@angular/core"; function load(inject: (value: unknown) => void, Injector: unknown) { inject(Injector); }',
+    'import { runInInjectionContext } from "@angular/core"; function load(runInInjectionContext: (callback: () => void) => void) { runInInjectionContext(() => work()); }',
+    'import * as ng from "@angular/core"; function load(ng: { inject(value: unknown): void; Injector: unknown }) { ng.inject(ng.Injector); }',
   ],
   invalid: [
     {

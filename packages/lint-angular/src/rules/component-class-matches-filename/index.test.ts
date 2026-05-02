@@ -21,6 +21,14 @@ await run({
       filename: "/app/login-page.component.ts",
       code: "class LoginPageComponent {}",
     },
+    {
+      filename: "/app/user-card.component.ts",
+      code: 'import { Component } from "@angular/core"; export class UserCardHarness {} @Component({}) export class UserCardComponent {}',
+    },
+    {
+      filename: "/app/user-card.component.ts",
+      code: 'import { Component } from "not-angular"; @Component({}) export class OtherComponent {}',
+    },
   ],
   invalid: [
     {
@@ -31,6 +39,11 @@ await run({
     {
       filename: "/app/admin.component.ts",
       code: 'import * as ng from "@angular/core"; @ng.Component({}) export class AdminPageComponent {}',
+      errors: [{ messageId: "classNameMismatch", type: "Identifier" }],
+    },
+    {
+      filename: "/app/user-card.component.ts",
+      code: 'import { Component } from "@angular/core"; export class UserCardHarness {} @Component({}) export class CardComponent {}',
       errors: [{ messageId: "classNameMismatch", type: "Identifier" }],
     },
   ],

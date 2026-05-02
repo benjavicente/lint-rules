@@ -2,6 +2,7 @@ import { defineRule } from "@oxlint/plugins";
 import type { Context, Rule } from "@oxlint/plugins";
 import { getPropertyName } from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
+import { isShadowedIdentifier } from "../../utilities/scope.js";
 
 interface RuleOptions {
   disallowInjectInjector?: boolean;
@@ -13,6 +14,7 @@ const DEFAULT_DISALLOW_RUN_IN_INJECTION_CONTEXT = true;
 const RUN_IN_INJECTION_CONTEXT_NAMES = new Set(["runInInjectionContext", "runInContext"]);
 
 function isAngularNamespaceMember(
+  context: Context,
   node: AnyNode | null | undefined,
   namespaces: Set<string>,
   memberName: string,
@@ -21,44 +23,53 @@ function isAngularNamespaceMember(
     node?.type === "MemberExpression" &&
     node.object?.type === "Identifier" &&
     namespaces.has(node.object.name) &&
+    !isShadowedIdentifier(context, node.object) &&
     getPropertyName(node.property) === memberName
   );
 }
 
 function isInjectCall(
+  context: Context,
   callNode: AnyNode,
   injectNames: Set<string>,
   angularNamespaces: Set<string>,
 ): boolean {
   const callee = callNode.callee;
   return (
-    (callee?.type === "Identifier" && injectNames.has(callee.name)) ||
-    isAngularNamespaceMember(callee, angularNamespaces, "inject")
+    (callee?.type === "Identifier" &&
+      injectNames.has(callee.name) &&
+      !isShadowedIdentifier(context, callee)) ||
+    isAngularNamespaceMember(context, callee, angularNamespaces, "inject")
   );
 }
 
 function isInjectorReference(
+  context: Context,
   node: AnyNode | null | undefined,
   injectorNames: Set<string>,
   angularNamespaces: Set<string>,
 ): boolean {
   return (
-    (node?.type === "Identifier" && injectorNames.has(node.name)) ||
-    isAngularNamespaceMember(node, angularNamespaces, "Injector")
+    (node?.type === "Identifier" &&
+      injectorNames.has(node.name) &&
+      !isShadowedIdentifier(context, node)) ||
+    isAngularNamespaceMember(context, node, angularNamespaces, "Injector")
   );
 }
 
 function isDisallowedInjectInjector(
+  context: Context,
   callNode: AnyNode,
   injectNames: Set<string>,
   injectorNames: Set<string>,
   angularNamespaces: Set<string>,
 ): boolean {
-  if (!isInjectCall(callNode, injectNames, angularNamespaces)) return false;
-  return isInjectorReference(callNode.arguments?.[0], injectorNames, angularNamespaces);
+  if (!isInjectCall(context, callNode, injectNames, angularNamespaces)) return false;
+  return isInjectorReference(context, callNode.arguments?.[0], injectorNames, angularNamespaces);
 }
 
 function isDisallowedRunInInjectionContext(
+  context: Context,
   callNode: AnyNode,
   runInInjectionContextNames: Set<string>,
   runInContextNames: Set<string>,
@@ -66,13 +77,17 @@ function isDisallowedRunInInjectionContext(
 ): boolean {
   const callee = callNode.callee;
   if (callee?.type === "Identifier") {
-    return runInInjectionContextNames.has(callee.name) || runInContextNames.has(callee.name);
+    return (
+      (runInInjectionContextNames.has(callee.name) || runInContextNames.has(callee.name)) &&
+      !isShadowedIdentifier(context, callee)
+    );
   }
 
   if (
     callee?.type === "MemberExpression" &&
     callee.object?.type === "Identifier" &&
-    angularNamespaces.has(callee.object.name)
+    angularNamespaces.has(callee.object.name) &&
+    !isShadowedIdentifier(context, callee.object)
   ) {
     return RUN_IN_INJECTION_CONTEXT_NAMES.has(getPropertyName(callee.property) ?? "");
   }
@@ -160,7 +175,13 @@ const avoidExplicitInjectionContext = defineRule({
 
         if (
           disallowInjectInjector &&
-          isDisallowedInjectInjector(callNode, injectNames, injectorNames, angularNamespaces)
+          isDisallowedInjectInjector(
+            context,
+            callNode,
+            injectNames,
+            injectorNames,
+            angularNamespaces,
+          )
         ) {
           context.report({
             node: callNode.callee,
@@ -171,6 +192,7 @@ const avoidExplicitInjectionContext = defineRule({
         if (
           disallowRunInInjectionContext &&
           isDisallowedRunInInjectionContext(
+            context,
             callNode,
             runInInjectionContextNames,
             runInContextNames,

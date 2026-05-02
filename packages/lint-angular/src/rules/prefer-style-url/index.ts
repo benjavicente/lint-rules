@@ -2,11 +2,25 @@ import { defineRule } from "@oxlint/plugins";
 import type { Context, Rule } from "@oxlint/plugins";
 import { getPropertyName, getRange } from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
+import { isShadowedIdentifier } from "../../utilities/scope.js";
 
-function isComponentDecoratorCall(node: AnyNode): boolean {
+function isComponentDecoratorCall(
+  context: Context,
+  node: AnyNode,
+  componentLocalNames: Set<string>,
+  angularNamespaces: Set<string>,
+): boolean {
   const callee = node.callee;
-  if (callee?.type === "Identifier") return callee.name === "Component";
-  return callee?.type === "MemberExpression" && getPropertyName(callee.property) === "Component";
+  if (callee?.type === "Identifier") {
+    return componentLocalNames.has(callee.name) && !isShadowedIdentifier(context, callee);
+  }
+  return (
+    callee?.type === "MemberExpression" &&
+    callee.object?.type === "Identifier" &&
+    angularNamespaces.has(callee.object.name) &&
+    !isShadowedIdentifier(context, callee.object) &&
+    getPropertyName(callee.property) === "Component"
+  );
 }
 
 function isSingleStyleFileNode(node: AnyNode | null | undefined): boolean {
@@ -32,10 +46,35 @@ const preferStyleUrl = defineRule({
   },
 
   createOnce(context: Context) {
+    const componentLocalNames = new Set<string>();
+    const angularNamespaces = new Set<string>();
+
     return {
+      before() {
+        componentLocalNames.clear();
+        angularNamespaces.clear();
+      },
+
+      ImportDeclaration(node) {
+        if (node.source?.value !== "@angular/core") return;
+
+        for (const specifier of node.specifiers ?? []) {
+          if (specifier.type === "ImportSpecifier") {
+            const importedName = getPropertyName(specifier.imported as AnyNode);
+            if (importedName === "Component") componentLocalNames.add(specifier.local.name);
+          }
+
+          if (specifier.type === "ImportNamespaceSpecifier") {
+            angularNamespaces.add(specifier.local.name);
+          }
+        }
+      },
+
       CallExpression(node) {
         const call = node as AnyNode;
-        if (!isComponentDecoratorCall(call)) return;
+        if (!isComponentDecoratorCall(context, call, componentLocalNames, angularNamespaces)) {
+          return;
+        }
 
         const metadata = call.arguments?.[0];
         if (metadata?.type !== "ObjectExpression") return;

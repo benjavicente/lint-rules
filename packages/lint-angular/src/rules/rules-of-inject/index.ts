@@ -1,7 +1,13 @@
 import { defineRule } from "@oxlint/plugins";
 import type { Context, Rule } from "@oxlint/plugins";
-import { getDecoratorName, getPropertyName } from "../../utilities/ast.js";
+import {
+  getDecoratorName,
+  getNodeStart,
+  getPropertyName,
+  getTypeName,
+} from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
+import { isShadowedIdentifier } from "../../utilities/scope.js";
 
 interface RuleOptions {
   allowedFunctionNames?: string[];
@@ -12,6 +18,11 @@ interface RuleOptions {
     from: string;
     imports: string[] | "all";
   }>;
+}
+
+interface InjectionContextApiImports {
+  from: string;
+  imports: string[];
 }
 
 const DEFAULT_ALLOWED_FUNCTION_NAMES: string[] = [];
@@ -45,6 +56,27 @@ const ANGULAR_CLASS_DECORATOR_NAMES = new Set([
 ]);
 
 const INJECTION_CONTEXT_RUNNER_NAMES = new Set(["runInInjectionContext", "runInContext"]);
+const KNOWN_INJECTION_CONTEXT_API_IMPORTS: InjectionContextApiImports[] = [
+  {
+    from: "@angular/core",
+    imports: [
+      "afterEveryRender",
+      "afterNextRender",
+      "afterRender",
+      "afterRenderEffect",
+      "assertInInjectionContext",
+      "effect",
+      "inject",
+      "resource",
+    ],
+  },
+  {
+    from: "@angular/core/rxjs-interop",
+    imports: ["rxResource", "toObservable", "toSignal"],
+  },
+  { from: "@angular/common/http", imports: ["httpResource"] },
+  { from: "@angular/forms/signals", imports: ["form"] },
+];
 
 const INJECTION_CONTEXT_FUNCTION_TYPE_NAMES = new Set([
   "CanActivateFn",
@@ -64,18 +96,6 @@ const FUNCTION_TYPES = new Set([
 ]);
 
 const CLASS_FIELD_TYPES = new Set(["AccessorProperty", "FieldDefinition", "PropertyDefinition"]);
-
-function getTypeName(node: AnyNode | null | undefined): string | null {
-  if (!node) return null;
-  if (node.type === "Identifier") return node.name;
-  if (node.type === "TSTypeReference") return getTypeName(node.typeName);
-  if (node.type === "TSQualifiedName") {
-    const left = getTypeName(node.left);
-    const right = getTypeName(node.right);
-    return left && right ? `${left}.${right}` : (right ?? left);
-  }
-  return null;
-}
 
 function isFunction(node: AnyNode | null | undefined): boolean {
   return !!node && FUNCTION_TYPES.has(node.type);
@@ -209,12 +229,6 @@ function isTypedInjectionContextFunction(functionNode: AnyNode): boolean {
   return INJECTION_CONTEXT_FUNCTION_TYPE_NAMES.has(unqualifiedTypeName ?? typeName);
 }
 
-function getNodeStart(node: AnyNode): number | null {
-  if (typeof node.start === "number") return node.start;
-  if (Array.isArray(node.range) && typeof node.range[0] === "number") return node.range[0];
-  return null;
-}
-
 function hasAwaitBeforeNodeInFunction(functionNode: AnyNode, node: AnyNode): boolean {
   const nodeStart = getNodeStart(node);
   if (nodeStart === null) return false;
@@ -329,38 +343,71 @@ function isAllowedInjectionContext(
     : false;
 }
 
-function isAngularInjectCall(
+function getKnownInjectionContextApiImports(source: string): Set<string> | null {
+  const apiImports = KNOWN_INJECTION_CONTEXT_API_IMPORTS.find((entry) => entry.from === source);
+  return apiImports ? new Set(apiImports.imports) : null;
+}
+
+function isKnownInjectionContextApiCall(
+  context: Context,
   node: AnyNode,
-  injectNames: Set<string>,
-  angularNamespaces: Set<string>,
+  injectionContextApiLocalNames: Set<string>,
+  injectionContextApiNamespaceMembers: Map<string, Set<string>>,
   checkUnimportedInject: boolean,
 ): boolean {
   const callee = node.callee;
   if (callee?.type === "Identifier") {
-    return injectNames.has(callee.name) || (checkUnimportedInject && callee.name === "inject");
+    return (
+      (injectionContextApiLocalNames.has(callee.name) && !isShadowedIdentifier(context, callee)) ||
+      (checkUnimportedInject && callee.name === "inject" && !isShadowedIdentifier(context, callee))
+    );
   }
 
-  return (
-    callee?.type === "MemberExpression" &&
-    callee.object?.type === "Identifier" &&
-    angularNamespaces.has(callee.object.name) &&
-    getPropertyName(callee.property) === "inject"
-  );
+  if (callee?.type !== "MemberExpression") {
+    return false;
+  }
+
+  if (callee.object?.type === "Identifier") {
+    if (
+      injectionContextApiLocalNames.has(callee.object.name) &&
+      !isShadowedIdentifier(context, callee.object)
+    ) {
+      return true;
+    }
+
+    const namespaceMembers = injectionContextApiNamespaceMembers.get(callee.object.name);
+    return (
+      !!namespaceMembers?.has(getPropertyName(callee.property) ?? "") &&
+      !isShadowedIdentifier(context, callee.object)
+    );
+  }
+
+  if (callee.object?.type === "MemberExpression" && callee.object.object?.type === "Identifier") {
+    const namespaceMembers = injectionContextApiNamespaceMembers.get(callee.object.object.name);
+    return (
+      !!namespaceMembers?.has(getPropertyName(callee.object.property) ?? "") &&
+      !isShadowedIdentifier(context, callee.object.object)
+    );
+  }
+
+  return false;
 }
 
 function isInjectLikeHelperCall(
+  context: Context,
   node: AnyNode,
-  injectNames: Set<string>,
+  injectionContextApiLocalNames: Set<string>,
   injectFunctionPrefixes: string[],
   injectFunctionSuffixes: string[],
   runsInInjectionContextFunctionNames: Set<string>,
 ): boolean {
   const callee = node.callee;
   if (callee?.type !== "Identifier") return false;
+  if (isShadowedIdentifier(context, callee)) return false;
   if (runsInInjectionContextFunctionNames.has(callee.name)) return true;
 
   return (
-    !injectNames.has(callee.name) &&
+    !injectionContextApiLocalNames.has(callee.name) &&
     callee.name !== "inject" &&
     (injectFunctionPrefixes.some((prefix) => callee.name.startsWith(prefix)) ||
       injectFunctionSuffixes.some((suffix) => callee.name.endsWith(suffix)))
@@ -371,7 +418,8 @@ const rulesOfInject = defineRule({
   meta: {
     type: "problem",
     docs: {
-      description: "Require Angular inject() calls to appear only in known injection contexts.",
+      description:
+        "Require Angular APIs that depend on injection context to appear only in known injection contexts.",
       recommended: true,
     },
 
@@ -419,20 +467,20 @@ const rulesOfInject = defineRule({
     ],
     messages: {
       disallowedInject:
-        "Angular inject() must be called from an injection context: a class field initializer or constructor in an Angular-decorated class, provider factory, InjectionToken factory, runInInjectionContext/runInContext callback, Angular route callback property (for example loadComponent/canActivate), an inject* or *Guard function, or configured allowed function.",
+        "Angular APIs that depend on injection context must be called from an injection context: a class field initializer or constructor in an Angular-decorated class, provider factory, InjectionToken factory, runInInjectionContext/runInContext callback, Angular route callback property (for example loadComponent/canActivate), an inject* or *Guard function, or configured allowed function.",
     },
   },
 
   createOnce(context) {
-    const injectNames = new Set<string>();
-    const angularNamespaces = new Set<string>();
+    const injectionContextApiLocalNames = new Set<string>();
+    const injectionContextApiNamespaceMembers = new Map<string, Set<string>>();
     const runsInInjectionContextFunctionNames = new Set<string>();
     let runsInInjectionContextRules: Array<{ from: string; imports: string[] | "all" }> = [];
 
     return {
       before() {
-        injectNames.clear();
-        angularNamespaces.clear();
+        injectionContextApiLocalNames.clear();
+        injectionContextApiNamespaceMembers.clear();
         runsInInjectionContextFunctionNames.clear();
         const options = (context.options[0] ?? {}) as RuleOptions;
         runsInInjectionContextRules =
@@ -466,18 +514,21 @@ const rulesOfInject = defineRule({
           }
         }
 
-        if (source !== "@angular/core") return;
+        const knownApiImports =
+          typeof source === "string" ? getKnownInjectionContextApiImports(source) : null;
 
-        for (const specifier of node.specifiers ?? []) {
-          if (
-            specifier.type === "ImportSpecifier" &&
-            getPropertyName(specifier.imported as AnyNode) === "inject"
-          ) {
-            injectNames.add(specifier.local.name);
-          }
+        if (knownApiImports) {
+          for (const specifier of node.specifiers ?? []) {
+            if (
+              specifier.type === "ImportSpecifier" &&
+              knownApiImports.has(getPropertyName(specifier.imported as AnyNode) ?? "")
+            ) {
+              injectionContextApiLocalNames.add(specifier.local.name);
+            }
 
-          if (specifier.type === "ImportNamespaceSpecifier") {
-            angularNamespaces.add(specifier.local.name);
+            if (specifier.type === "ImportNamespaceSpecifier") {
+              injectionContextApiNamespaceMembers.set(specifier.local.name, knownApiImports);
+            }
           }
         }
       },
@@ -502,8 +553,9 @@ const rulesOfInject = defineRule({
 
         if (
           isInjectLikeHelperCall(
+            context,
             node as AnyNode,
-            injectNames,
+            injectionContextApiLocalNames,
             injectFunctionPrefixes,
             injectFunctionSuffixes,
             runsInInjectionContextFunctionNames,
@@ -518,10 +570,11 @@ const rulesOfInject = defineRule({
         }
 
         if (
-          !isAngularInjectCall(
+          !isKnownInjectionContextApiCall(
+            context,
             node as AnyNode,
-            injectNames,
-            angularNamespaces,
+            injectionContextApiLocalNames,
+            injectionContextApiNamespaceMembers,
             checkUnimportedInject,
           )
         ) {

@@ -8,7 +8,9 @@ await run({
     'import type { Routes } from "@angular/router"; export const routes: Routes = [{ path: "login", loadComponent: () => import("./login.component").then((m) => m.LoginComponent) }];',
     'const routes: Routes = [{ path: "login", loadChildren: () => import("./feature.routes").then((m) => m.routes) }];',
     'import type { Routes } from "@angular/router"; export const routes = [{ path: "login", loadChildren: () => import("./feature.routes").then((m) => m.routes) }];',
-    'import type { Route } from "@angular/router"; export const routes: Route[] = [{ path: "login", loadChildren: () => import("./feature.routes").then((m) => m.routes) }];',
+    'import type { Routes } from "@angular/router"; export const routes: Routes = [{ path: "login", data: { loadChildren: "analytics-label" } }];',
+    'import type { Routes } from "@angular/router"; export const routes: Routes = [{ path: "login", providers: [{ provide: TOKEN, useValue: { loadChildren: true } }] }];',
+    'import type { Routes as RouterRoutes } from "not-angular"; export const routes: RouterRoutes = [{ path: "login", loadChildren: () => import("./feature.routes").then((m) => m.routes) }];',
   ],
   invalid: [
     {
@@ -17,6 +19,18 @@ await run({
     },
     {
       code: 'import type { Routes } from "@angular/router"; export const routes: Routes = [{ path: "parent", children: [{ path: "child", loadChildren: () => import("./child.routes").then((m) => m.routes) }] }];',
+      errors: [{ messageId: "avoidLoadChildren", type: "Identifier" }],
+    },
+    {
+      code: 'import type { Route } from "@angular/router"; export const routes: Route[] = [{ path: "login", loadChildren: () => import("./feature.routes").then((m) => m.routes) }];',
+      errors: [{ messageId: "avoidLoadChildren", type: "Identifier" }],
+    },
+    {
+      code: 'import type { Route } from "@angular/router"; export const routes: Array<Route> = [{ path: "login", loadChildren: () => import("./feature.routes").then((m) => m.routes) }];',
+      errors: [{ messageId: "avoidLoadChildren", type: "Identifier" }],
+    },
+    {
+      code: 'import type { Routes as RouterRoutes } from "@angular/router"; export const routes: RouterRoutes = [{ path: "login", loadChildren: () => import("./feature.routes").then((m) => m.routes) }];',
       errors: [{ messageId: "avoidLoadChildren", type: "Identifier" }],
     },
   ],

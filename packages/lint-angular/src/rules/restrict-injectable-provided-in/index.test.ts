@@ -9,6 +9,7 @@ await run({
     'import { Injectable } from "@angular/core"; @Injectable({ providedIn: "platform" }) export class PlatformService {}',
     'import { Injectable } from "@angular/core"; @Injectable() export class LocalService {}',
     'import * as ng from "@angular/core"; @ng.Injectable({ providedIn: "root" }) export class RootService {}',
+    'import { Injectable } from "not-angular"; @Injectable({ providedIn: "any" }) export class OtherService {}',
   ],
   invalid: [
     {

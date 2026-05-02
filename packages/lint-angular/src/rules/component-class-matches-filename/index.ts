@@ -1,6 +1,10 @@
 import { defineRule } from "@oxlint/plugins";
 import type { Context, Rule } from "@oxlint/plugins";
 import type { AnyNode } from "../../utilities/ast.js";
+import { addAngularCoreDecoratorImport, isAngularCoreDecorator } from "../../utilities/angular.js";
+import type { AngularCoreDecoratorImports } from "../../utilities/angular.js";
+
+const COMPONENT_DECORATORS = new Set(["Component"]);
 
 function toPascalCase(raw: string): string {
   return raw
@@ -34,15 +38,42 @@ const componentClassMatchesFilename = defineRule({
   },
 
   createOnce(context: Context) {
-    const classDeclarations: AnyNode[] = [];
+    const componentClasses: AnyNode[] = [];
+    const decoratorImports: AngularCoreDecoratorImports = {
+      decoratorNames: COMPONENT_DECORATORS,
+      decoratorLocalNames: new Set<string>(),
+      angularNamespaces: new Set<string>(),
+    };
 
     return {
       before() {
-        classDeclarations.length = 0;
+        componentClasses.length = 0;
+        decoratorImports.decoratorLocalNames.clear();
+        decoratorImports.angularNamespaces.clear();
+      },
+
+      ImportDeclaration(node) {
+        if (node.source?.value !== "@angular/core") return;
+
+        for (const specifier of node.specifiers ?? []) {
+          addAngularCoreDecoratorImport(
+            specifier as AnyNode,
+            COMPONENT_DECORATORS,
+            decoratorImports,
+          );
+        }
       },
 
       ClassDeclaration(node) {
-        classDeclarations.push(node as AnyNode);
+        const classNode = node as AnyNode;
+        if (!Array.isArray(classNode.decorators)) return;
+        if (
+          classNode.decorators.some((decorator: AnyNode) =>
+            isAngularCoreDecorator(context, decorator, decoratorImports),
+          )
+        ) {
+          componentClasses.push(classNode);
+        }
       },
 
       after() {
@@ -51,13 +82,13 @@ const componentClassMatchesFilename = defineRule({
         if (!expectedName) return;
         const baseFilename = filename.split(/[/\\]/u).at(-1) ?? filename;
 
-        const exportedClass =
-          classDeclarations.find(
+        const exportedComponent =
+          componentClasses.find(
             (candidate) =>
               candidate.parent?.type === "ExportNamedDeclaration" ||
               candidate.parent?.type === "ExportDefaultDeclaration",
           ) ?? null;
-        const classNode = exportedClass ?? classDeclarations[0];
+        const classNode = exportedComponent ?? componentClasses[0];
         if (!classNode?.id?.name) return;
 
         if (classNode.id.name === expectedName) return;
