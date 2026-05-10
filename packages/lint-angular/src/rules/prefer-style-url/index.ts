@@ -2,24 +2,15 @@ import { defineRule } from "@oxlint/plugins";
 import type { Context, Rule } from "@oxlint/plugins";
 import { getPropertyName, getRange } from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
-import { isShadowedIdentifier } from "../../utilities/scope.js";
+import { isImportedNamespaceMember, isImportedReference } from "../../utilities/angular.js";
 
-function isComponentDecoratorCall(
-  context: Context,
-  node: AnyNode,
-  componentLocalNames: Set<string>,
-  angularNamespaces: Set<string>,
-): boolean {
+const COMPONENT_DECORATORS = new Set(["Component"]);
+
+function isComponentDecoratorCall(context: Context, node: AnyNode): boolean {
   const callee = node.callee;
-  if (callee?.type === "Identifier") {
-    return componentLocalNames.has(callee.name) && !isShadowedIdentifier(context, callee);
-  }
   return (
-    callee?.type === "MemberExpression" &&
-    callee.object?.type === "Identifier" &&
-    angularNamespaces.has(callee.object.name) &&
-    !isShadowedIdentifier(context, callee.object) &&
-    getPropertyName(callee.property) === "Component"
+    isImportedReference(context, callee, "@angular/core", COMPONENT_DECORATORS) ||
+    isImportedNamespaceMember(context, callee, "@angular/core", COMPONENT_DECORATORS)
   );
 }
 
@@ -46,35 +37,10 @@ const preferStyleUrl = defineRule({
   },
 
   createOnce(context: Context) {
-    const componentLocalNames = new Set<string>();
-    const angularNamespaces = new Set<string>();
-
     return {
-      before() {
-        componentLocalNames.clear();
-        angularNamespaces.clear();
-      },
-
-      ImportDeclaration(node) {
-        if (node.source?.value !== "@angular/core") return;
-
-        for (const specifier of node.specifiers ?? []) {
-          if (specifier.type === "ImportSpecifier") {
-            const importedName = getPropertyName(specifier.imported as AnyNode);
-            if (importedName === "Component") componentLocalNames.add(specifier.local.name);
-          }
-
-          if (specifier.type === "ImportNamespaceSpecifier") {
-            angularNamespaces.add(specifier.local.name);
-          }
-        }
-      },
-
       CallExpression(node) {
         const call = node as AnyNode;
-        if (!isComponentDecoratorCall(context, call, componentLocalNames, angularNamespaces)) {
-          return;
-        }
+        if (!isComponentDecoratorCall(context, call)) return;
 
         const metadata = call.arguments?.[0];
         if (metadata?.type !== "ObjectExpression") return;

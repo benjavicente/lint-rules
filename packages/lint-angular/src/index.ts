@@ -7,8 +7,9 @@ import avoidExplicitSubscriptionManagement from "./rules/avoid-explicit-subscrip
 import avoidNgModules from "./rules/avoid-ng-modules/index.js";
 import avoidRxjsStateInComponent from "./rules/avoid-rxjs-state-in-component/index.js";
 import avoidWritingSignalsInReactiveContext from "./rules/avoid-writing-signals-in-reactive-context/index.js";
-import componentClassMatchesFilename from "./rules/component-class-matches-filename/index.js";
+import classMatchesFilename from "./rules/class-matches-filename/index.js";
 import componentResourceFilenames from "./rules/component-resource-filenames/index.js";
+import decoratorFilenameSuffix from "./rules/decorator-filename-suffix/index.js";
 import preferLoadComponentOverLoadChildren from "./rules/prefer-load-component-over-load-children/index.js";
 import preferPrivateElements from "./rules/prefer-private-elements/index.js";
 import preferStyleUrl from "./rules/prefer-style-url/index.js";
@@ -27,8 +28,9 @@ const plugin = eslintCompatPlugin({
     "avoid-rxjs-state-in-component": avoidRxjsStateInComponent,
     "avoid-writing-signals-in-reactive-context": avoidWritingSignalsInReactiveContext,
     "class-member-order": classMemberOrder,
-    "component-class-matches-filename": componentClassMatchesFilename,
+    "class-matches-filename": classMatchesFilename,
     "component-resource-filenames": componentResourceFilenames,
+    "decorator-filename-suffix": decoratorFilenameSuffix,
     "prefer-load-component-over-load-children": preferLoadComponentOverLoadChildren,
     "prefer-private-elements": preferPrivateElements,
     "prefer-style-url": preferStyleUrl,

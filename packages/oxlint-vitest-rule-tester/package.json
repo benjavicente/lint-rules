@@ -29,15 +29,15 @@
     "lint": "vp lint src"
   },
   "devDependencies": {
-    "@oxlint/plugins": "^1.61.0",
+    "@oxlint/plugins": "^1.63.0",
     "@types/node": "^22.15.3",
-    "typescript": "^6.0.3",
+    "typescript": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@oxlint/plugins": ">=1.61.0",
-    "oxlint": ">=1.61.0",
-    "vitest": ">=2.0.0"
+    "@oxlint/plugins": ">=1.63.0",
+    "oxlint": ">=1.63.0",
+    "vitest": ">=3.0.0"
   }
 }

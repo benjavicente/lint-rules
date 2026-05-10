@@ -1,67 +1,71 @@
 import { defineRule } from "@oxlint/plugins";
 import type { Context, Rule } from "@oxlint/plugins";
-import { getPropertyName, getTypeName } from "../../utilities/ast.js";
+import { getPropertyName } from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
+import { getImportedName, isNamespaceImport } from "../../utilities/angular.js";
 
-interface AngularRouterTypeImports {
-  routeTypeLocalNames: Set<string>;
-  routesTypeLocalNames: Set<string>;
-  routerNamespaces: Set<string>;
-}
+const ROUTE_TYPE_NAMES = new Set(["Route"]);
+const ROUTES_TYPE_NAMES = new Set(["Routes"]);
 
 function isImportedTypeName(
+  context: Context,
   typeNode: AnyNode | null | undefined,
-  localNames: Set<string>,
-  routerNamespaces: Set<string>,
+  importedNames: Set<string>,
 ): boolean {
-  const typeName = getTypeName(typeNode);
-  if (!typeName) return false;
-  if (!typeName.includes(".")) return localNames.has(typeName);
+  if (typeNode?.type === "Identifier") {
+    const importedName = getImportedName(context, typeNode, "@angular/router");
+    return !!importedName && importedNames.has(importedName);
+  }
 
-  const [namespaceName, memberName] = typeName.split(".");
-  return routerNamespaces.has(namespaceName) && localNames.has(memberName);
+  return (
+    typeNode?.type === "TSQualifiedName" &&
+    typeNode.left?.type === "Identifier" &&
+    isNamespaceImport(context, typeNode.left, "@angular/router") &&
+    importedNames.has(getPropertyName(typeNode.right) ?? "")
+  );
 }
 
 function getTypeParameterNodes(typeNode: AnyNode): AnyNode[] {
   return typeNode.typeParameters?.params ?? typeNode.typeArguments?.params ?? [];
 }
 
-function isRouteType(typeNode: AnyNode | null | undefined, imports: AngularRouterTypeImports) {
+function isRouteType(context: Context, typeNode: AnyNode | null | undefined) {
   return (
     typeNode?.type === "TSTypeReference" &&
-    isImportedTypeName(typeNode.typeName, imports.routeTypeLocalNames, imports.routerNamespaces)
+    isImportedTypeName(context, typeNode.typeName, ROUTE_TYPE_NAMES)
   );
 }
 
-function isRouteArrayType(typeNode: AnyNode | null | undefined, imports: AngularRouterTypeImports) {
+function isRouteArrayType(context: Context, typeNode: AnyNode | null | undefined) {
   if (!typeNode) return false;
 
   if (
     typeNode.type === "TSTypeReference" &&
-    isImportedTypeName(typeNode.typeName, imports.routesTypeLocalNames, imports.routerNamespaces)
+    isImportedTypeName(context, typeNode.typeName, ROUTES_TYPE_NAMES)
   ) {
     return true;
   }
 
   if (typeNode.type === "TSArrayType") {
-    return isRouteType(typeNode.elementType, imports);
+    return isRouteType(context, typeNode.elementType);
   }
 
   if (typeNode.type !== "TSTypeReference") return false;
 
-  const typeName = getTypeName(typeNode.typeName);
-  if (typeName !== "Array" && typeName !== "ReadonlyArray") return false;
+  if (
+    getPropertyName(typeNode.typeName) !== "Array" &&
+    getPropertyName(typeNode.typeName) !== "ReadonlyArray"
+  ) {
+    return false;
+  }
   const [elementType] = getTypeParameterNodes(typeNode);
-  return isRouteType(elementType, imports);
+  return isRouteType(context, elementType);
 }
 
-function isRoutesTypeAnnotation(
-  node: AnyNode | null | undefined,
-  imports: AngularRouterTypeImports,
-): boolean {
+function isRoutesTypeAnnotation(context: Context, node: AnyNode | null | undefined): boolean {
   const typeAnnotation = node?.typeAnnotation;
   if (!typeAnnotation || typeAnnotation.type !== "TSTypeAnnotation") return false;
-  return isRouteArrayType(typeAnnotation.typeAnnotation, imports);
+  return isRouteArrayType(context, typeAnnotation.typeAnnotation);
 }
 
 function isExportedConstDeclarator(node: AnyNode): boolean {
@@ -88,12 +92,6 @@ const preferLoadComponentOverLoadChildren = defineRule({
   },
 
   createOnce(context: Context) {
-    const imports: AngularRouterTypeImports = {
-      routeTypeLocalNames: new Set<string>(),
-      routesTypeLocalNames: new Set<string>(),
-      routerNamespaces: new Set<string>(),
-    };
-
     function reportLoadChildrenInRouteObject(routeObject: AnyNode): void {
       for (const property of routeObject.properties ?? []) {
         if (property.type !== "Property" || property.computed) continue;
@@ -122,35 +120,11 @@ const preferLoadComponentOverLoadChildren = defineRule({
     }
 
     return {
-      before() {
-        imports.routeTypeLocalNames.clear();
-        imports.routesTypeLocalNames.clear();
-        imports.routerNamespaces.clear();
-      },
-
-      ImportDeclaration(node) {
-        if (node.source?.value !== "@angular/router") return;
-
-        for (const specifier of node.specifiers ?? []) {
-          if (specifier.type === "ImportSpecifier") {
-            const importedName = getPropertyName(specifier.imported as AnyNode);
-            if (importedName === "Route") imports.routeTypeLocalNames.add(specifier.local.name);
-            if (importedName === "Routes") imports.routesTypeLocalNames.add(specifier.local.name);
-          }
-
-          if (specifier.type === "ImportNamespaceSpecifier") {
-            imports.routerNamespaces.add(specifier.local.name);
-            imports.routeTypeLocalNames.add("Route");
-            imports.routesTypeLocalNames.add("Routes");
-          }
-        }
-      },
-
       VariableDeclarator(node) {
         const declarator = node as AnyNode;
         if (!isExportedConstDeclarator(declarator)) return;
         if (declarator.id?.type !== "Identifier") return;
-        if (!isRoutesTypeAnnotation(declarator.id, imports)) return;
+        if (!isRoutesTypeAnnotation(context, declarator.id)) return;
         if (declarator.init?.type !== "ArrayExpression") return;
 
         reportLoadChildrenInRouteArray(declarator.init);

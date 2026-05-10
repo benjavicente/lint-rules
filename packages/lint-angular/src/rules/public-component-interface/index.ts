@@ -2,9 +2,11 @@ import { defineRule } from "@oxlint/plugins";
 import type { Context, Fix, Fixer, Rule } from "@oxlint/plugins";
 import { getPropertyName, getRange } from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
-import { addAngularCoreDecoratorImport, isAngularCoreDecorator } from "../../utilities/angular.js";
-import type { AngularCoreDecoratorImports } from "../../utilities/angular.js";
-import { isShadowedIdentifier } from "../../utilities/scope.js";
+import {
+  isAngularCoreDecorator,
+  isImportedNamespaceMember,
+  isImportedReference,
+} from "../../utilities/angular.js";
 
 const TARGET_DECORATORS = new Set(["Component", "Directive"]);
 const INPUT_MODEL_APIS = new Set(["input", "model"]);
@@ -12,30 +14,22 @@ const OUTPUT_APIS = new Set(["output", "outputFromObservable"]);
 const INJECT_APIS = new Set(["inject"]);
 const FIELD_NODE_TYPES = new Set(["AccessorProperty", "FieldDefinition", "PropertyDefinition"]);
 
-function hasTargetDecorator(
-  context: Context,
-  classNode: AnyNode | null | undefined,
-  decoratorImports: AngularCoreDecoratorImports,
-): boolean {
+function hasTargetDecorator(context: Context, classNode: AnyNode | null | undefined): boolean {
   if (!classNode || !Array.isArray(classNode.decorators)) return false;
   return classNode.decorators.some((decorator: AnyNode) =>
-    isAngularCoreDecorator(context, decorator, decoratorImports),
+    isAngularCoreDecorator(context, decorator, TARGET_DECORATORS),
   );
 }
 
-function isApiCallFromTrackedImports(
+function isApiCallFromAngularCore(
   context: Context,
   node: AnyNode | null | undefined,
-  importedApiLocalNames: Set<string>,
-  angularNamespaces: Set<string>,
   apiNames: Set<string>,
 ): boolean {
   if (!node || node.type !== "CallExpression") return false;
   const callee = node.callee;
 
-  if (callee?.type === "Identifier") {
-    return importedApiLocalNames.has(callee.name) && !isShadowedIdentifier(context, callee);
-  }
+  if (isImportedReference(context, callee, "@angular/core", apiNames)) return true;
 
   if (callee?.type !== "MemberExpression") return false;
 
@@ -44,35 +38,25 @@ function isApiCallFromTrackedImports(
   // Handles input.required(...) and alias.required(...)
   if (getPropertyName(callee.property) === "required" && callee.object?.type === "Identifier") {
     return (
-      supportsRequiredApi &&
-      importedApiLocalNames.has(callee.object.name) &&
-      !isShadowedIdentifier(context, callee.object)
+      supportsRequiredApi && isImportedReference(context, callee.object, "@angular/core", apiNames)
     );
   }
 
   // Handles ng.input(...) and ng.output(...)
-  if (callee.object?.type === "Identifier" && angularNamespaces.has(callee.object.name)) {
-    const namespaceApiName = getPropertyName(callee.property);
-    return (
-      !!namespaceApiName &&
-      apiNames.has(namespaceApiName) &&
-      !isShadowedIdentifier(context, callee.object)
-    );
-  }
+  if (isImportedNamespaceMember(context, callee, "@angular/core", apiNames)) return true;
 
   // Handles ng.input.required(...) / ng.model.required(...)
   if (
     getPropertyName(callee.property) === "required" &&
     callee.object?.type === "MemberExpression" &&
-    callee.object.object?.type === "Identifier" &&
-    angularNamespaces.has(callee.object.object.name)
+    callee.object.object?.type === "Identifier"
   ) {
     const namespaceApiName = getPropertyName(callee.object.property);
     return (
       supportsRequiredApi &&
       !!namespaceApiName &&
       apiNames.has(namespaceApiName) &&
-      !isShadowedIdentifier(context, callee.object.object)
+      isImportedNamespaceMember(context, callee.object, "@angular/core", apiNames)
     );
   }
 
@@ -142,67 +126,20 @@ const publicComponentInterface = defineRule({
   },
 
   createOnce(context: Context) {
-    const inputModelLocalNames = new Set<string>();
-    const outputLocalNames = new Set<string>();
-    const injectLocalNames = new Set<string>();
-    const angularNamespaces = new Set<string>();
-    const decoratorImports: AngularCoreDecoratorImports = {
-      decoratorNames: TARGET_DECORATORS,
-      decoratorLocalNames: new Set<string>(),
-      angularNamespaces,
-    };
-
     return {
-      before() {
-        inputModelLocalNames.clear();
-        outputLocalNames.clear();
-        injectLocalNames.clear();
-        angularNamespaces.clear();
-        decoratorImports.decoratorLocalNames.clear();
-      },
-
-      ImportDeclaration(node) {
-        if (node.source?.value !== "@angular/core") return;
-
-        for (const specifier of node.specifiers ?? []) {
-          addAngularCoreDecoratorImport(specifier as AnyNode, TARGET_DECORATORS, decoratorImports);
-
-          if (specifier.type === "ImportSpecifier") {
-            const importedName = getPropertyName(specifier.imported as AnyNode);
-            if (!importedName) continue;
-            if (INPUT_MODEL_APIS.has(importedName)) inputModelLocalNames.add(specifier.local.name);
-            if (OUTPUT_APIS.has(importedName)) outputLocalNames.add(specifier.local.name);
-            if (INJECT_APIS.has(importedName)) injectLocalNames.add(specifier.local.name);
-            continue;
-          }
-
-          if (specifier.type === "ImportNamespaceSpecifier") {
-            angularNamespaces.add(specifier.local.name);
-          }
-        }
-      },
-
       ClassBody(node) {
         const classNode = (node as AnyNode).parent;
-        if (!hasTargetDecorator(context, classNode, decoratorImports)) return;
+        if (!hasTargetDecorator(context, classNode)) return;
 
         for (const member of (node as AnyNode).body ?? []) {
           if (!FIELD_NODE_TYPES.has(member.type)) continue;
 
-          const isInputModelMember = isApiCallFromTrackedImports(
+          const isInputModelMember = isApiCallFromAngularCore(
             context,
             member.value,
-            inputModelLocalNames,
-            angularNamespaces,
             INPUT_MODEL_APIS,
           );
-          const isOutputMember = isApiCallFromTrackedImports(
-            context,
-            member.value,
-            outputLocalNames,
-            angularNamespaces,
-            OUTPUT_APIS,
-          );
+          const isOutputMember = isApiCallFromAngularCore(context, member.value, OUTPUT_APIS);
 
           if (isInputModelMember && isNonPublicMember(member)) {
             context.report({
@@ -226,13 +163,7 @@ const publicComponentInterface = defineRule({
 
           if (
             isPublicMember(member) &&
-            isApiCallFromTrackedImports(
-              context,
-              member.value,
-              injectLocalNames,
-              angularNamespaces,
-              INJECT_APIS,
-            )
+            isApiCallFromAngularCore(context, member.value, INJECT_APIS)
           ) {
             context.report({
               node: member.key ?? member,
@@ -242,13 +173,6 @@ const publicComponentInterface = defineRule({
             });
           }
         }
-      },
-
-      "Program:exit"() {
-        inputModelLocalNames.clear();
-        outputLocalNames.clear();
-        injectLocalNames.clear();
-        angularNamespaces.clear();
       },
     };
   },

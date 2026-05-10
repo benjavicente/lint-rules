@@ -2,8 +2,7 @@ import { defineRule } from "@oxlint/plugins";
 import type { Context, Rule } from "@oxlint/plugins";
 import { getPropertyName } from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
-import { addAngularCoreDecoratorImport, isAngularCoreDecorator } from "../../utilities/angular.js";
-import type { AngularCoreDecoratorImports } from "../../utilities/angular.js";
+import { isAngularCoreDecorator } from "../../utilities/angular.js";
 
 const COMPONENT_DECORATORS = new Set(["Component"]);
 const STYLE_EXTENSIONS = new Set(["css", "less", "sass", "scss"]);
@@ -51,13 +50,9 @@ function getStaticString(node: AnyNode | null | undefined): StaticString | null 
   return null;
 }
 
-function getComponentMetadata(
-  context: Context,
-  node: AnyNode,
-  decoratorImports: AngularCoreDecoratorImports,
-): AnyNode | null {
+function getComponentMetadata(context: Context, node: AnyNode): AnyNode | null {
   if (node.type !== "Decorator") return null;
-  if (!isAngularCoreDecorator(context, node, decoratorImports)) return null;
+  if (!isAngularCoreDecorator(context, node, COMPONENT_DECORATORS)) return null;
 
   const expression = node.expression;
   if (expression?.type !== "CallExpression") return null;
@@ -85,14 +80,9 @@ const componentResourceFilenames = defineRule({
   },
 
   createOnce(context: Context) {
-    const decoratorImports: AngularCoreDecoratorImports = {
-      decoratorNames: COMPONENT_DECORATORS,
-      decoratorLocalNames: new Set<string>(),
-      angularNamespaces: new Set<string>(),
-    };
+    let expectedStem: string | null = null;
 
     function reportTemplateUrl(valueNode: AnyNode): void {
-      const expectedStem = getExpectedStem(context.filename ?? "");
       if (!expectedStem) return;
 
       const staticString = getStaticString(valueNode);
@@ -109,7 +99,6 @@ const componentResourceFilenames = defineRule({
     }
 
     function reportStyleUrl(valueNode: AnyNode): void {
-      const expectedStem = getExpectedStem(context.filename ?? "");
       if (!expectedStem) return;
 
       const staticString = getStaticString(valueNode);
@@ -136,24 +125,12 @@ const componentResourceFilenames = defineRule({
 
     return {
       before() {
-        decoratorImports.decoratorLocalNames.clear();
-        decoratorImports.angularNamespaces.clear();
-      },
-
-      ImportDeclaration(node) {
-        if (node.source?.value !== "@angular/core") return;
-
-        for (const specifier of node.specifiers ?? []) {
-          addAngularCoreDecoratorImport(
-            specifier as AnyNode,
-            COMPONENT_DECORATORS,
-            decoratorImports,
-          );
-        }
+        expectedStem = getExpectedStem(context.filename ?? "");
+        if (!expectedStem) return false;
       },
 
       Decorator(node) {
-        const metadata = getComponentMetadata(context, node as AnyNode, decoratorImports);
+        const metadata = getComponentMetadata(context, node as AnyNode);
         if (!metadata) return;
 
         for (const property of metadata.properties ?? []) {

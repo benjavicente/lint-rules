@@ -2,64 +2,37 @@ import { defineRule } from "@oxlint/plugins";
 import type { Context, Rule } from "@oxlint/plugins";
 import { getPropertyName } from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
-import { findNearestBindingIdentifier, isShadowedIdentifier } from "../../utilities/scope.js";
+import { isImportedNamespaceMember, isImportedReference } from "../../utilities/angular.js";
+import { findNearestBindingIdentifier } from "../../utilities/scope.js";
 
 const SIGNAL_WRITE_METHODS = new Set(["set", "update", "mutate"]);
 const KNOWN_SIGNAL_CREATION_FUNCTIONS = new Set(["signal", "model", "linkedSignal"]);
 const LINKED_SIGNAL_CREATOR_NAME = "linkedSignal";
 const COMPUTED_CREATOR_NAME = "computed";
 const EFFECT_CREATOR_NAME = "effect";
+const EFFECT_CREATOR_NAMES = new Set([EFFECT_CREATOR_NAME]);
+const COMPUTED_CREATOR_NAMES = new Set([COMPUTED_CREATOR_NAME]);
+const LINKED_SIGNAL_CREATOR_NAMES = new Set([LINKED_SIGNAL_CREATOR_NAME]);
 
 interface RuleOptions {
   allowEffects?: boolean;
   allowComputedAndLinkedSignals?: boolean;
 }
 
-function isAngularCoreNamespaceMember(
-  context: Context,
-  node: AnyNode | null | undefined,
-  angularNamespaces: Set<string>,
-  memberName: string,
-): boolean {
-  return (
-    node?.type === "MemberExpression" &&
-    node.object?.type === "Identifier" &&
-    angularNamespaces.has(node.object.name) &&
-    !isShadowedIdentifier(context, node.object) &&
-    getPropertyName(node.property) === memberName
-  );
-}
-
-function isSignalCreatorCall(
-  context: Context,
-  node: AnyNode | null | undefined,
-  signalCreatorNames: Set<string>,
-  angularNamespaces: Set<string>,
-): boolean {
+function isSignalCreatorCall(context: Context, node: AnyNode | null | undefined): boolean {
   if (node?.type !== "CallExpression") return false;
   const callee = node.callee;
   return (
-    (callee?.type === "Identifier" &&
-      signalCreatorNames.has(callee.name) &&
-      !isShadowedIdentifier(context, callee)) ||
-    [...KNOWN_SIGNAL_CREATION_FUNCTIONS].some((name) =>
-      isAngularCoreNamespaceMember(context, callee, angularNamespaces, name),
-    )
+    isImportedReference(context, callee, "@angular/core", KNOWN_SIGNAL_CREATION_FUNCTIONS) ||
+    isImportedNamespaceMember(context, callee, "@angular/core", KNOWN_SIGNAL_CREATION_FUNCTIONS)
   );
 }
 
-function isEffectCall(
-  context: Context,
-  node: AnyNode,
-  effectNames: Set<string>,
-  angularNamespaces: Set<string>,
-): boolean {
+function isEffectCall(context: Context, node: AnyNode): boolean {
   const callee = node.callee;
   return (
-    (callee?.type === "Identifier" &&
-      effectNames.has(callee.name) &&
-      !isShadowedIdentifier(context, callee)) ||
-    isAngularCoreNamespaceMember(context, callee, angularNamespaces, "effect")
+    isImportedReference(context, callee, "@angular/core", EFFECT_CREATOR_NAMES) ||
+    isImportedNamespaceMember(context, callee, "@angular/core", EFFECT_CREATOR_NAMES)
   );
 }
 
@@ -67,15 +40,11 @@ function isReactiveCreatorCall(
   context: Context,
   node: AnyNode,
   creatorNames: Set<string>,
-  angularNamespaces: Set<string>,
-  angularMemberName: string,
 ): boolean {
   const callee = node.callee;
   return (
-    (callee?.type === "Identifier" &&
-      creatorNames.has(callee.name) &&
-      !isShadowedIdentifier(context, callee)) ||
-    isAngularCoreNamespaceMember(context, callee, angularNamespaces, angularMemberName)
+    isImportedReference(context, callee, "@angular/core", creatorNames) ||
+    isImportedNamespaceMember(context, callee, "@angular/core", creatorNames)
   );
 }
 
@@ -161,53 +130,19 @@ const avoidWritingSignalsInReactiveContext = defineRule({
   },
 
   createOnce(context: Context) {
-    const effectNames = new Set<string>();
-    const computedNames = new Set<string>();
-    const linkedSignalNames = new Set<string>();
-    const signalCreatorNames = new Set<string>();
-    const angularNamespaces = new Set<string>();
     const signalVariableBindings = new Map<string, Set<AnyNode>>();
     const classSignalProperties = new Set<string>();
 
     return {
       before() {
-        effectNames.clear();
-        computedNames.clear();
-        linkedSignalNames.clear();
-        signalCreatorNames.clear();
-        angularNamespaces.clear();
         signalVariableBindings.clear();
         classSignalProperties.clear();
-      },
-
-      ImportDeclaration(node) {
-        if (node.source?.value !== "@angular/core") return;
-
-        for (const specifier of node.specifiers ?? []) {
-          if (specifier.type === "ImportSpecifier") {
-            const importedName = getPropertyName(specifier.imported as AnyNode);
-            if (importedName === EFFECT_CREATOR_NAME) effectNames.add(specifier.local.name);
-            if (importedName === COMPUTED_CREATOR_NAME) computedNames.add(specifier.local.name);
-            if (importedName === LINKED_SIGNAL_CREATOR_NAME) {
-              linkedSignalNames.add(specifier.local.name);
-            }
-            if (importedName && KNOWN_SIGNAL_CREATION_FUNCTIONS.has(importedName)) {
-              signalCreatorNames.add(specifier.local.name);
-            }
-          }
-
-          if (specifier.type === "ImportNamespaceSpecifier") {
-            angularNamespaces.add(specifier.local.name);
-          }
-        }
       },
 
       VariableDeclarator(node) {
         const declarator = node as AnyNode;
         if (declarator.id?.type !== "Identifier") return;
-        if (!isSignalCreatorCall(context, declarator.init, signalCreatorNames, angularNamespaces)) {
-          return;
-        }
+        if (!isSignalCreatorCall(context, declarator.init)) return;
         const bindings = signalVariableBindings.get(declarator.id.name) ?? new Set<AnyNode>();
         bindings.add(declarator.id);
         signalVariableBindings.set(declarator.id.name, bindings);
@@ -216,9 +151,7 @@ const avoidWritingSignalsInReactiveContext = defineRule({
       "PropertyDefinition, FieldDefinition, AccessorProperty"(node) {
         const property = node as AnyNode;
         if (property.key?.type !== "Identifier") return;
-        if (!isSignalCreatorCall(context, property.value, signalCreatorNames, angularNamespaces)) {
-          return;
-        }
+        if (!isSignalCreatorCall(context, property.value)) return;
         classSignalProperties.add(property.key.name);
       },
 
@@ -230,7 +163,7 @@ const avoidWritingSignalsInReactiveContext = defineRule({
         const callNode = node as AnyNode;
         const callbackCandidates: { callback: AnyNode; contextName: string }[] = [];
 
-        if (!allowEffects && isEffectCall(context, callNode, effectNames, angularNamespaces)) {
+        if (!allowEffects && isEffectCall(context, callNode)) {
           const callback = callNode.arguments?.[0] as AnyNode | undefined;
           if (
             callback?.type === "ArrowFunctionExpression" ||
@@ -242,13 +175,7 @@ const avoidWritingSignalsInReactiveContext = defineRule({
 
         if (
           !allowComputedAndLinkedSignals &&
-          isReactiveCreatorCall(
-            context,
-            callNode,
-            computedNames,
-            angularNamespaces,
-            COMPUTED_CREATOR_NAME,
-          )
+          isReactiveCreatorCall(context, callNode, COMPUTED_CREATOR_NAMES)
         ) {
           const callback = callNode.arguments?.[0] as AnyNode | undefined;
           if (
@@ -261,13 +188,7 @@ const avoidWritingSignalsInReactiveContext = defineRule({
 
         if (
           !allowComputedAndLinkedSignals &&
-          isReactiveCreatorCall(
-            context,
-            callNode,
-            linkedSignalNames,
-            angularNamespaces,
-            LINKED_SIGNAL_CREATOR_NAME,
-          )
+          isReactiveCreatorCall(context, callNode, LINKED_SIGNAL_CREATOR_NAMES)
         ) {
           for (const argumentNode of callNode.arguments ?? []) {
             const argument = argumentNode as AnyNode;
@@ -331,11 +252,6 @@ const avoidWritingSignalsInReactiveContext = defineRule({
       },
 
       after() {
-        effectNames.clear();
-        computedNames.clear();
-        linkedSignalNames.clear();
-        signalCreatorNames.clear();
-        angularNamespaces.clear();
         signalVariableBindings.clear();
         classSignalProperties.clear();
       },

@@ -2,8 +2,7 @@ import { defineRule } from "@oxlint/plugins";
 import type { Context, Rule } from "@oxlint/plugins";
 import { getPropertyName, getTypeName, unwrapExpression } from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
-import { addAngularCoreDecoratorImport, isAngularCoreDecorator } from "../../utilities/angular.js";
-import type { AngularCoreDecoratorImports } from "../../utilities/angular.js";
+import { isAngularCoreDecorator } from "../../utilities/angular.js";
 import { findNearestBindingIdentifier, isShadowedIdentifier } from "../../utilities/scope.js";
 
 const TARGET_DECORATORS = new Set(["Component", "Directive", "Injectable"]);
@@ -17,14 +16,10 @@ const RXJS_SUBSCRIBABLE_NAMES = new Set([
 ]);
 type TrackedReferences = Map<string, Set<AnyNode>>;
 
-function hasTargetDecorator(
-  context: Context,
-  classNode: AnyNode | null | undefined,
-  decoratorImports: AngularCoreDecoratorImports,
-): boolean {
+function hasTargetDecorator(context: Context, classNode: AnyNode | null | undefined): boolean {
   if (!classNode || !Array.isArray(classNode.decorators)) return false;
   return classNode.decorators.some((decorator: AnyNode) =>
-    isAngularCoreDecorator(context, decorator, decoratorImports),
+    isAngularCoreDecorator(context, decorator, TARGET_DECORATORS),
   );
 }
 
@@ -685,11 +680,6 @@ const avoidExplicitSubscriptionManagement = defineRule({
     const rxjsNamespaces = new Set<string>();
     const takeUntilDestroyedLocalNames = new Set<string>();
     const interopNamespaces = new Set<string>();
-    const decoratorImports: AngularCoreDecoratorImports = {
-      decoratorNames: TARGET_DECORATORS,
-      decoratorLocalNames: new Set<string>(),
-      angularNamespaces: new Set<string>(),
-    };
 
     return {
       before() {
@@ -698,22 +688,10 @@ const avoidExplicitSubscriptionManagement = defineRule({
         rxjsNamespaces.clear();
         takeUntilDestroyedLocalNames.clear();
         interopNamespaces.clear();
-        decoratorImports.decoratorLocalNames.clear();
-        decoratorImports.angularNamespaces.clear();
       },
 
       ImportDeclaration(node) {
         const source = node.source?.value;
-
-        if (source === "@angular/core") {
-          for (const specifier of node.specifiers ?? []) {
-            addAngularCoreDecoratorImport(
-              specifier as AnyNode,
-              TARGET_DECORATORS,
-              decoratorImports,
-            );
-          }
-        }
 
         if (source === "rxjs") {
           for (const specifier of node.specifiers ?? []) {
@@ -752,7 +730,7 @@ const avoidExplicitSubscriptionManagement = defineRule({
       ClassBody(node) {
         const classBody = node as AnyNode;
         const classNode = classBody.parent as AnyNode | undefined;
-        if (!classNode || !hasTargetDecorator(context, classNode, decoratorImports)) return;
+        if (!classNode || !hasTargetDecorator(context, classNode)) return;
 
         const rxjsSubscribableReferences = collectRxjsSubscribableReferences(
           context,

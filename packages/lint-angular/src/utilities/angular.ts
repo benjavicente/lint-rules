@@ -3,48 +3,96 @@ import { getPropertyName } from "./ast.js";
 import type { AnyNode } from "./ast.js";
 import { isShadowedIdentifier } from "./scope.js";
 
-export interface AngularCoreDecoratorImports {
-  decoratorNames: Set<string>;
-  decoratorLocalNames: Set<string>;
-  angularNamespaces: Set<string>;
+function getProgramNode(context: Context, node: AnyNode): AnyNode | null {
+  if (node.type === "Program") return node;
+
+  const ancestors = context.sourceCode.getAncestors(node) as AnyNode[];
+  return ancestors.find((ancestor) => ancestor.type === "Program") ?? null;
 }
 
-export function addAngularCoreDecoratorImport(
-  specifier: AnyNode,
-  decoratorNames: Set<string>,
-  imports: AngularCoreDecoratorImports,
-) {
-  if (specifier.type === "ImportSpecifier") {
-    const importedName = getPropertyName(specifier.imported as AnyNode);
-    if (importedName && decoratorNames.has(importedName)) {
-      imports.decoratorLocalNames.add(specifier.local.name);
+export function getImportedName(
+  context: Context,
+  node: AnyNode | null | undefined,
+  source: string,
+): string | null {
+  if (node?.type !== "Identifier") return null;
+  if (isShadowedIdentifier(context, node)) return null;
+
+  const program = getProgramNode(context, node);
+  for (const statement of program?.body ?? []) {
+    if (statement.type !== "ImportDeclaration" || statement.source?.value !== source) continue;
+
+    for (const specifier of statement.specifiers ?? []) {
+      if (specifier.type !== "ImportSpecifier" || specifier.local.name !== node.name) continue;
+
+      return getPropertyName(specifier.imported as AnyNode);
     }
   }
 
-  if (specifier.type === "ImportNamespaceSpecifier") {
-    imports.angularNamespaces.add(specifier.local.name);
+  return null;
+}
+
+export function isNamespaceImport(
+  context: Context,
+  node: AnyNode | null | undefined,
+  source: string,
+): boolean {
+  if (node?.type !== "Identifier") return false;
+  if (isShadowedIdentifier(context, node)) return false;
+
+  const program = getProgramNode(context, node);
+  for (const statement of program?.body ?? []) {
+    if (statement.type !== "ImportDeclaration" || statement.source?.value !== source) continue;
+
+    if (
+      (statement.specifiers ?? []).some(
+        (specifier: AnyNode) =>
+          specifier.type === "ImportNamespaceSpecifier" && specifier.local.name === node.name,
+      )
+    ) {
+      return true;
+    }
   }
+
+  return false;
+}
+
+export function isImportedReference(
+  context: Context,
+  node: AnyNode | null | undefined,
+  source: string,
+  importedNames: ReadonlySet<string>,
+): boolean {
+  const importedName = getImportedName(context, node, source);
+  return !!importedName && importedNames.has(importedName);
+}
+
+export function isImportedNamespaceMember(
+  context: Context,
+  node: AnyNode | null | undefined,
+  source: string,
+  memberNames: ReadonlySet<string>,
+): boolean {
+  return (
+    node?.type === "MemberExpression" &&
+    node.object?.type === "Identifier" &&
+    isNamespaceImport(context, node.object, source) &&
+    memberNames.has(getPropertyName(node.property) ?? "")
+  );
 }
 
 export function isAngularCoreDecorator(
   context: Context,
   decorator: AnyNode | null | undefined,
-  imports: AngularCoreDecoratorImports,
+  decoratorNames: ReadonlySet<string>,
 ): boolean {
   if (!decorator) return false;
 
   const expression = decorator.expression ?? decorator;
   const callee = expression?.type === "CallExpression" ? expression.callee : expression;
 
-  if (callee?.type === "Identifier") {
-    return imports.decoratorLocalNames.has(callee.name) && !isShadowedIdentifier(context, callee);
-  }
-
   return (
-    callee?.type === "MemberExpression" &&
-    callee.object?.type === "Identifier" &&
-    imports.angularNamespaces.has(callee.object.name) &&
-    !isShadowedIdentifier(context, callee.object) &&
-    imports.decoratorNames.has(getPropertyName(callee.property) ?? "")
+    isImportedReference(context, callee, "@angular/core", decoratorNames) ||
+    isImportedNamespaceMember(context, callee, "@angular/core", decoratorNames)
   );
 }

@@ -2,8 +2,11 @@ import { defineRule } from "@oxlint/plugins";
 import type { Context, Fix, Fixer, Rule } from "@oxlint/plugins";
 import { getPropertyName, getRange } from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
-import { addAngularCoreDecoratorImport, isAngularCoreDecorator } from "../../utilities/angular.js";
-import { isShadowedIdentifier } from "../../utilities/scope.js";
+import {
+  isAngularCoreDecorator,
+  isImportedNamespaceMember,
+  isImportedReference,
+} from "../../utilities/angular.js";
 
 const ANGULAR_CLASS_DECORATOR_NAMES = new Set([
   "Component",
@@ -24,17 +27,6 @@ const ORDER_LABELS = [
   "everything else",
 ] as const;
 
-interface TrackedAngularImports {
-  decoratorNames: Set<string>;
-  decoratorLocalNames: Set<string>;
-  injectLocalNames: Set<string>;
-  inputModelLocalNames: Set<string>;
-  inputModelDecoratorLocalNames: Set<string>;
-  outputLocalNames: Set<string>;
-  outputDecoratorLocalNames: Set<string>;
-  angularNamespaces: Set<string>;
-}
-
 interface ClassifiedMember {
   element: AnyNode;
   group: MemberGroup;
@@ -53,28 +45,23 @@ const enum MemberGroup {
 function hasAngularClassDecorator(
   context: Context,
   classNode: AnyNode | null | undefined,
-  imports: TrackedAngularImports,
 ): boolean {
   if (!classNode || !Array.isArray(classNode.decorators)) return false;
 
   return classNode.decorators.some((decorator: AnyNode) =>
-    isAngularCoreDecorator(context, decorator, imports),
+    isAngularCoreDecorator(context, decorator, ANGULAR_CLASS_DECORATOR_NAMES),
   );
 }
 
 function isApiCall(
   context: Context,
   node: AnyNode | null | undefined,
-  localNames: Set<string>,
-  angularNamespaces: Set<string>,
   apiNames: Set<string>,
 ): boolean {
   if (!node || node.type !== "CallExpression") return false;
 
   const callee = node.callee;
-  if (callee?.type === "Identifier") {
-    return localNames.has(callee.name) && !isShadowedIdentifier(context, callee);
-  }
+  if (isImportedReference(context, callee, "@angular/core", apiNames)) return true;
 
   if (callee?.type !== "MemberExpression") return false;
 
@@ -84,16 +71,11 @@ function isApiCall(
     if (getPropertyName(callee.property) === "required") {
       return (
         supportsRequiredApi &&
-        localNames.has(callee.object.name) &&
-        !isShadowedIdentifier(context, callee.object)
+        isImportedReference(context, callee.object, "@angular/core", apiNames)
       );
     }
 
-    return (
-      angularNamespaces.has(callee.object.name) &&
-      !isShadowedIdentifier(context, callee.object) &&
-      apiNames.has(getPropertyName(callee.property) ?? "")
-    );
+    return isImportedNamespaceMember(context, callee, "@angular/core", apiNames);
   }
 
   if (
@@ -103,8 +85,7 @@ function isApiCall(
   ) {
     return (
       supportsRequiredApi &&
-      angularNamespaces.has(callee.object.object.name) &&
-      !isShadowedIdentifier(context, callee.object.object) &&
+      isImportedNamespaceMember(context, callee.object, "@angular/core", apiNames) &&
       apiNames.has(getPropertyName(callee.object.property) ?? "")
     );
   }
@@ -112,92 +93,29 @@ function isApiCall(
   return false;
 }
 
-function hasDecorator(
-  context: Context,
-  element: AnyNode,
-  localNames: Set<string>,
-  angularNamespaces: Set<string>,
-  decoratorNames: Set<string>,
-): boolean {
+function hasDecorator(context: Context, element: AnyNode, decoratorNames: Set<string>): boolean {
   return Array.isArray(element.decorators)
-    ? element.decorators.some((decorator: AnyNode) => {
-        const expression = decorator.expression ?? decorator;
-        const callee = expression?.type === "CallExpression" ? expression.callee : expression;
-
-        if (callee?.type === "Identifier") {
-          return localNames.has(callee.name) && !isShadowedIdentifier(context, callee);
-        }
-
-        return (
-          callee?.type === "MemberExpression" &&
-          callee.object?.type === "Identifier" &&
-          angularNamespaces.has(callee.object.name) &&
-          !isShadowedIdentifier(context, callee.object) &&
-          decoratorNames.has(getPropertyName(callee.property) ?? "")
-        );
-      })
+    ? element.decorators.some((decorator: AnyNode) =>
+        isAngularCoreDecorator(context, decorator, decoratorNames),
+      )
     : false;
 }
 
-function classifyMember(
-  context: Context,
-  element: AnyNode,
-  imports: TrackedAngularImports,
-): MemberGroup | null {
+function classifyMember(context: Context, element: AnyNode): MemberGroup | null {
   if (CLASS_FIELD_TYPES.has(element.type)) {
-    if (
-      isApiCall(
-        context,
-        element.value,
-        imports.injectLocalNames,
-        imports.angularNamespaces,
-        new Set(["inject"]),
-      )
-    ) {
+    if (isApiCall(context, element.value, new Set(["inject"]))) {
       return MemberGroup.PlainInject;
     }
-    if (
-      isApiCall(
-        context,
-        element.value,
-        imports.inputModelLocalNames,
-        imports.angularNamespaces,
-        INPUT_MODEL_CALL_NAMES,
-      )
-    ) {
+    if (isApiCall(context, element.value, INPUT_MODEL_CALL_NAMES)) {
       return MemberGroup.InputModel;
     }
-    if (
-      hasDecorator(
-        context,
-        element,
-        imports.inputModelDecoratorLocalNames,
-        imports.angularNamespaces,
-        new Set(["Input"]),
-      )
-    ) {
+    if (hasDecorator(context, element, new Set(["Input"]))) {
       return MemberGroup.InputModel;
     }
-    if (
-      isApiCall(
-        context,
-        element.value,
-        imports.outputLocalNames,
-        imports.angularNamespaces,
-        OUTPUT_CALL_NAMES,
-      )
-    ) {
+    if (isApiCall(context, element.value, OUTPUT_CALL_NAMES)) {
       return MemberGroup.Output;
     }
-    if (
-      hasDecorator(
-        context,
-        element,
-        imports.outputDecoratorLocalNames,
-        imports.angularNamespaces,
-        new Set(["Output"]),
-      )
-    ) {
+    if (hasDecorator(context, element, new Set(["Output"]))) {
       return MemberGroup.Output;
     }
     return MemberGroup.EverythingElse;
@@ -380,64 +298,10 @@ const classMemberOrder = defineRule({
   },
 
   createOnce(context: Context) {
-    const imports: TrackedAngularImports = {
-      decoratorNames: ANGULAR_CLASS_DECORATOR_NAMES,
-      decoratorLocalNames: new Set<string>(),
-      injectLocalNames: new Set<string>(),
-      inputModelLocalNames: new Set<string>(),
-      inputModelDecoratorLocalNames: new Set<string>(),
-      outputLocalNames: new Set<string>(),
-      outputDecoratorLocalNames: new Set<string>(),
-      angularNamespaces: new Set<string>(),
-    };
-
     return {
-      before() {
-        imports.decoratorLocalNames.clear();
-        imports.injectLocalNames.clear();
-        imports.inputModelLocalNames.clear();
-        imports.inputModelDecoratorLocalNames.clear();
-        imports.outputLocalNames.clear();
-        imports.outputDecoratorLocalNames.clear();
-        imports.angularNamespaces.clear();
-      },
-
-      ImportDeclaration(node) {
-        if (node.source?.value !== "@angular/core") return;
-
-        for (const specifier of node.specifiers ?? []) {
-          addAngularCoreDecoratorImport(
-            specifier as AnyNode,
-            ANGULAR_CLASS_DECORATOR_NAMES,
-            imports,
-          );
-
-          if (specifier.type === "ImportSpecifier") {
-            const importedName = getPropertyName(specifier.imported as AnyNode);
-            if (importedName === "inject") imports.injectLocalNames.add(specifier.local.name);
-            if (importedName && INPUT_MODEL_CALL_NAMES.has(importedName)) {
-              imports.inputModelLocalNames.add(specifier.local.name);
-            }
-            if (importedName === "Input") {
-              imports.inputModelDecoratorLocalNames.add(specifier.local.name);
-            }
-            if (importedName && OUTPUT_CALL_NAMES.has(importedName)) {
-              imports.outputLocalNames.add(specifier.local.name);
-            }
-            if (importedName === "Output") {
-              imports.outputDecoratorLocalNames.add(specifier.local.name);
-            }
-          }
-
-          if (specifier.type === "ImportNamespaceSpecifier") {
-            imports.angularNamespaces.add(specifier.local.name);
-          }
-        }
-      },
-
       ClassBody(node) {
         const classBody = node as AnyNode;
-        if (!hasAngularClassDecorator(context, classBody.parent, imports)) return;
+        if (!hasAngularClassDecorator(context, classBody.parent)) return;
 
         let highestSeen: MemberGroup | null = null;
         const classifiedMembers: ClassifiedMember[] = [];
@@ -448,7 +312,7 @@ const classMemberOrder = defineRule({
         }> = [];
 
         for (const element of classBody.body ?? []) {
-          const group = classifyMember(context, element, imports);
+          const group = classifyMember(context, element);
           if (group === null) continue;
           classifiedMembers.push({
             element,

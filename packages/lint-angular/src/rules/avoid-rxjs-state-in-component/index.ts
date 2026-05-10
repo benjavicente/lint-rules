@@ -1,10 +1,12 @@
 import { defineRule } from "@oxlint/plugins";
 import type { Context, Rule } from "@oxlint/plugins";
-import { getPropertyName, getTypeName, unwrapExpression } from "../../utilities/ast.js";
+import { getPropertyName, unwrapExpression } from "../../utilities/ast.js";
 import type { AnyNode } from "../../utilities/ast.js";
-import { addAngularCoreDecoratorImport, isAngularCoreDecorator } from "../../utilities/angular.js";
-import type { AngularCoreDecoratorImports } from "../../utilities/angular.js";
-import { isShadowedIdentifier } from "../../utilities/scope.js";
+import {
+  getImportedName,
+  isAngularCoreDecorator,
+  isNamespaceImport,
+} from "../../utilities/angular.js";
 
 type SubjectKind = "BehaviorSubject" | "ReplaySubject" | "Subject";
 
@@ -23,76 +25,56 @@ interface FieldUsage {
 const TARGET_DECORATORS = new Set(["Component", "Directive"]);
 const SUBJECT_NAMES = new Set<SubjectKind>(["BehaviorSubject", "ReplaySubject", "Subject"]);
 const FIELD_NODE_TYPES = new Set(["AccessorProperty", "FieldDefinition", "PropertyDefinition"]);
-function hasTargetDecorator(
-  context: Context,
-  classNode: AnyNode | null | undefined,
-  decoratorImports: AngularCoreDecoratorImports,
-): boolean {
+function hasTargetDecorator(context: Context, classNode: AnyNode | null | undefined): boolean {
   if (!classNode || !Array.isArray(classNode.decorators)) return false;
   return classNode.decorators.some((decorator: AnyNode) =>
-    isAngularCoreDecorator(context, decorator, decoratorImports),
+    isAngularCoreDecorator(context, decorator, TARGET_DECORATORS),
   );
 }
 
-function getImportedSubjectKind(
-  localName: string,
-  subjectLocalNames: Map<string, SubjectKind>,
-): SubjectKind | null {
-  return subjectLocalNames.get(localName) ?? null;
+function getImportedSubjectKind(context: Context, node: AnyNode | null | undefined) {
+  const importedName = getImportedName(context, node, "rxjs");
+  return SUBJECT_NAMES.has(importedName as SubjectKind) ? (importedName as SubjectKind) : null;
 }
 
 function getSubjectKindFromType(
   context: Context,
   node: AnyNode | null | undefined,
-  subjectLocalNames: Map<string, SubjectKind>,
-  rxjsNamespaces: Set<string>,
 ): SubjectKind | null {
   if (!node) return null;
   if (node.type !== "TSTypeReference") return null;
 
-  const typeName = getTypeName(node.typeName);
-  if (!typeName) return null;
-
-  const localKind = getImportedSubjectKind(typeName, subjectLocalNames);
-  if (
-    localKind &&
-    node.typeName?.type === "Identifier" &&
-    !isShadowedIdentifier(context, node.typeName)
-  ) {
-    return localKind;
+  if (node.typeName?.type === "Identifier") {
+    return getImportedSubjectKind(context, node.typeName);
   }
 
-  if (!typeName.includes(".")) return null;
-  const [namespaceName, memberName] = typeName.split(".");
-  if (!rxjsNamespaces.has(namespaceName)) return null;
-  if (
-    node.typeName?.type === "TSQualifiedName" &&
-    node.typeName.left?.type === "Identifier" &&
-    isShadowedIdentifier(context, node.typeName.left)
-  ) {
-    return null;
+  if (node.typeName?.type === "TSQualifiedName" && node.typeName.left?.type === "Identifier") {
+    const memberName = getPropertyName(node.typeName.right);
+    return isNamespaceImport(context, node.typeName.left, "rxjs") &&
+      SUBJECT_NAMES.has(memberName as SubjectKind)
+      ? (memberName as SubjectKind)
+      : null;
   }
-  return SUBJECT_NAMES.has(memberName as SubjectKind) ? (memberName as SubjectKind) : null;
+
+  return null;
 }
 
 function getSubjectKindFromConstructor(
   context: Context,
   node: AnyNode | null | undefined,
-  subjectLocalNames: Map<string, SubjectKind>,
-  rxjsNamespaces: Set<string>,
 ): SubjectKind | null {
   const expression = unwrapExpression(node);
   if (expression?.type !== "NewExpression") return null;
 
   const callee = unwrapExpression(expression.callee);
   if (callee?.type === "Identifier") {
-    if (isShadowedIdentifier(context, callee)) return null;
-    return getImportedSubjectKind(callee.name, subjectLocalNames);
+    return getImportedSubjectKind(context, callee);
   }
 
   if (callee?.type !== "MemberExpression") return null;
-  if (callee.object?.type !== "Identifier" || !rxjsNamespaces.has(callee.object.name)) return null;
-  if (isShadowedIdentifier(context, callee.object)) return null;
+  if (callee.object?.type !== "Identifier" || !isNamespaceImport(context, callee.object, "rxjs")) {
+    return null;
+  }
 
   const memberName = getPropertyName(callee.property);
   return SUBJECT_NAMES.has(memberName as SubjectKind) ? (memberName as SubjectKind) : null;
@@ -177,12 +159,7 @@ function getUsage(usages: Map<string, FieldUsage>, fieldName: string): FieldUsag
   return next;
 }
 
-function collectSubjectFields(
-  context: Context,
-  classBody: AnyNode,
-  subjectLocalNames: Map<string, SubjectKind>,
-  rxjsNamespaces: Set<string>,
-): Map<string, SubjectField> {
+function collectSubjectFields(context: Context, classBody: AnyNode): Map<string, SubjectField> {
   const fields = new Map<string, SubjectField>();
 
   for (const member of classBody.body ?? []) {
@@ -193,8 +170,8 @@ function collectSubjectFields(
 
     const typeNode = member.typeAnnotation?.typeAnnotation;
     const kind =
-      getSubjectKindFromConstructor(context, member.value, subjectLocalNames, rxjsNamespaces) ??
-      getSubjectKindFromType(context, typeNode, subjectLocalNames, rxjsNamespaces);
+      getSubjectKindFromConstructor(context, member.value) ??
+      getSubjectKindFromType(context, typeNode);
 
     if (!kind) continue;
 
@@ -271,57 +248,13 @@ const avoidRxjsStateInComponent = defineRule({
   },
 
   createOnce(context) {
-    const subjectLocalNames = new Map<string, SubjectKind>();
-    const rxjsNamespaces = new Set<string>();
-    const decoratorImports: AngularCoreDecoratorImports = {
-      decoratorNames: TARGET_DECORATORS,
-      decoratorLocalNames: new Set<string>(),
-      angularNamespaces: new Set<string>(),
-    };
-
     return {
-      before() {
-        subjectLocalNames.clear();
-        rxjsNamespaces.clear();
-        decoratorImports.decoratorLocalNames.clear();
-        decoratorImports.angularNamespaces.clear();
-      },
-
-      ImportDeclaration(node) {
-        if (node.source?.value === "@angular/core") {
-          for (const specifier of node.specifiers ?? []) {
-            addAngularCoreDecoratorImport(
-              specifier as AnyNode,
-              TARGET_DECORATORS,
-              decoratorImports,
-            );
-          }
-          return;
-        }
-
-        if (node.source?.value !== "rxjs") return;
-
-        for (const specifier of node.specifiers ?? []) {
-          if (specifier.type === "ImportSpecifier") {
-            const importedName = getPropertyName(specifier.imported as AnyNode);
-            if (SUBJECT_NAMES.has(importedName as SubjectKind)) {
-              subjectLocalNames.set(specifier.local.name, importedName as SubjectKind);
-            }
-            continue;
-          }
-
-          if (specifier.type === "ImportNamespaceSpecifier") {
-            rxjsNamespaces.add(specifier.local.name);
-          }
-        }
-      },
-
       ClassBody(node) {
         const classBody = node as AnyNode;
         const classNode = classBody.parent as AnyNode | undefined;
-        if (!hasTargetDecorator(context, classNode, decoratorImports)) return;
+        if (!hasTargetDecorator(context, classNode)) return;
 
-        const fields = collectSubjectFields(context, classBody, subjectLocalNames, rxjsNamespaces);
+        const fields = collectSubjectFields(context, classBody);
         const usages = collectFieldUsages(classBody, fields);
 
         for (const [fieldName, field] of fields) {

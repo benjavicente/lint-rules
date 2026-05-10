@@ -1,6 +1,6 @@
 {
   "name": "@benjavicente/lint-angular",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Oxlint/ESLint-compatible rules for Angular.",
   "keywords": [
     "angular",
@@ -31,12 +31,12 @@
     "test": "vp test run"
   },
   "dependencies": {
-    "@oxlint/plugins": "^1.61.0"
+    "@oxlint/plugins": "^1.63.0"
   },
   "devDependencies": {
-    "@types/estree": "^1.0.8",
+    "@types/estree": "^1.0.9",
     "oxlint-vitest-rule-tester": "workspace:*",
-    "typescript": "^6.0.3",
+    "typescript": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   }
