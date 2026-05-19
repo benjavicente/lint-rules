@@ -19,13 +19,13 @@ await run({
     'import { inject } from "@angular/core"; import type { RedirectFunction } from "@angular/router"; const legacyRedirect: RedirectFunction = () => inject(Router).parseUrl("/login");',
     'import { inject } from "@angular/core"; import type { HttpInterceptorFn } from "@angular/common/http"; const authInterceptor: HttpInterceptorFn = (req, next) => { const auth = inject(AuthService); return next(req); };',
     'import { inject } from "@angular/core"; import type { CanMatchFn } from "@angular/router"; const canMatchTeam = (() => inject(Service).canMatch()) satisfies CanMatchFn;',
-    'import { inject } from "@angular/core"; function injextService() { return inject(Service); }',
+    'import { inject } from "@angular/core"; function injectService() { return inject(Service); }',
     'import { inject } from "@angular/core"; const authGuard = () => inject(Service);',
     'import { inject } from "@angular/core"; function authGuard() { return inject(Service); }',
-    'import { inject } from "@angular/core"; function injextA() { return injextB(); }',
-    'import { inject } from "@angular/core"; function authGuard() { return injextService(); }',
-    'import { inject } from "@angular/core"; const provider = { provide: S, useFactory: () => injextService() };',
-    'import { inject } from "@angular/core"; const route = { loadComponent: () => injextComponent() };',
+    'import { inject } from "@angular/core"; function injectA() { return injectB(); }',
+    'import { inject } from "@angular/core"; function authGuard() { return injectService(); }',
+    'import { inject } from "@angular/core"; const provider = { provide: S, useFactory: () => injectService() };',
+    'import { inject } from "@angular/core"; const route = { loadComponent: () => injectComponent() };',
     'import { inject } from "@angular/core"; const provider = { provide: S, useFactory: () => authGuard() };',
     {
       code: 'import { inject } from "@angular/core"; function makeService() { return inject(Service); }',
@@ -44,7 +44,7 @@ await run({
       options: [{ injectFunctionPrefixes: ["use"] }],
     },
     {
-      code: 'import { storage } from "@signality/core"; function injextLoad() { return storage("k", 123); }',
+      code: 'import { storage } from "@signality/core"; function injectLoad() { return storage("k", 123); }',
       options: [
         {
           runsInInjectionContext: [{ from: "@signality/core", imports: ["storage"] }],
@@ -85,7 +85,7 @@ await run({
       errors: ["disallowedInject"],
     },
     {
-      code: 'import { inject } from "@angular/core"; function load() { return injextService(); }',
+      code: 'import { inject } from "@angular/core"; function load() { return injectService(); }',
       errors: ["disallowedInject"],
     },
     {
@@ -145,7 +145,7 @@ await run({
       errors: ["disallowedInject"],
     },
     {
-      code: 'import { inject } from "@angular/core"; function injextService() { return inject(Service); }',
+      code: 'import { inject } from "@angular/core"; function injectService() { return inject(Service); }',
       options: [{ injectFunctionPrefixes: ["use"], injectFunctionSuffixes: ["Policy"] }],
       errors: ["disallowedInject"],
     },

@@ -20,7 +20,7 @@ It tries to check that those funcions are called only in:
 - callbacks passed to `runInInjectionContext`/`runInContext`
 - supported route callback properties (such as `loadComponent` and guards)
 
-By default, the convention is that utility functions that use the injection context should be prefixed with `injextXXX` or should be suffixed by `xxxGuard`. You can customize both naming conventions with `injectFunctionPrefixes` and `injectFunctionSuffixes`. If you use imported helpers from specific modules (for example `@signality/core`) that should be treated as running in injection context, configure them with `runsInInjectionContext`.
+By default, the convention is that utility functions that use the injection context should be prefixed with `injectXXX` or should be suffixed by `xxxGuard`. You can customize both naming conventions with `injectFunctionPrefixes` and `injectFunctionSuffixes`. If you use imported helpers from specific modules (for example `@signality/core`) that should be treated as running in injection context, configure them with `runsInInjectionContext`.
 
 ## Why
 
@@ -32,7 +32,7 @@ Calling APIs that depend on injection context outside an injection context cause
 {
   "allowedFunctionNames": [],
   "checkUnimportedInject": false,
-  "injectFunctionPrefixes": ["injext"],
+  "injectFunctionPrefixes": ["inject"],
   "injectFunctionSuffixes": ["Guard"],
   "runsInInjectionContext": []
 }

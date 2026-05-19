@@ -26,7 +26,7 @@ interface InjectionContextApiImports {
 }
 
 const DEFAULT_ALLOWED_FUNCTION_NAMES: string[] = [];
-const DEFAULT_INJECT_FUNCTION_PREFIXES = ["injext"];
+const DEFAULT_INJECT_FUNCTION_PREFIXES = ["inject"];
 const DEFAULT_INJECT_FUNCTION_SUFFIXES = ["Guard"];
 const DEFAULT_RUNS_IN_INJECTION_CONTEXT: Array<{
   from: string;
