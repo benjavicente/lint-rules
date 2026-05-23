@@ -11,7 +11,7 @@ import avoidWritingSignalsInReactiveContext from "./rules/avoid-writing-signals-
 import classMatchesFilename from "./rules/class-matches-filename/index.js";
 import componentResourceFilenames from "./rules/component-resource-filenames/index.js";
 import decoratorFilenameSuffix from "./rules/decorator-filename-suffix/index.js";
-import injectsTanstackQueryOnlyInComponentBody from "./rules/injects-tanstack-query-only-in-component-body/index.js";
+import noManualChangeDetection from "./rules/no-manual-change-detection/index.js";
 import noResourceApi from "./rules/no-resource-api/index.js";
 import noRouteResolvers from "./rules/no-route-resolvers/index.js";
 import noUiInheritance from "./rules/no-ui-inheritance/index.js";
@@ -21,6 +21,10 @@ import preferStyleUrl from "./rules/prefer-style-url/index.js";
 import publicComponentInterface from "./rules/public-component-interface/index.js";
 import restrictInjectableProvidedIn from "./rules/restrict-injectable-provided-in/index.js";
 import rulesOfInject from "./rules/rules-of-inject/index.js";
+import tanstackQueryInjectsOnlyInComponentBody from "./rules/tanstack-query-injects-only-in-component-body/index.js";
+import tanstackQueryInlinedKeys from "./rules/tanstack-query-inlined-keys/index.js";
+import tanstackQueryPreferQueryOptions from "./rules/tanstack-query-prefer-query-options/index.js";
+import vitestNoIncompatibleAngularTestingApis from "./rules/vitest-no-incompatible-angular-testing-apis/index.js";
 
 const plugin = eslintCompatPlugin({
   meta: {
@@ -37,7 +41,7 @@ const plugin = eslintCompatPlugin({
     "class-matches-filename": classMatchesFilename,
     "component-resource-filenames": componentResourceFilenames,
     "decorator-filename-suffix": decoratorFilenameSuffix,
-    "injects-tanstack-query-only-in-component-body": injectsTanstackQueryOnlyInComponentBody,
+    "no-manual-change-detection": noManualChangeDetection,
     "no-resource-api": noResourceApi,
     "no-route-resolvers": noRouteResolvers,
     "no-ui-inheritance": noUiInheritance,
@@ -47,6 +51,10 @@ const plugin = eslintCompatPlugin({
     "public-component-interface": publicComponentInterface,
     "restrict-injectable-provided-in": restrictInjectableProvidedIn,
     "rules-of-inject": rulesOfInject,
+    "tanstack-query-injects-only-in-component-body": tanstackQueryInjectsOnlyInComponentBody,
+    "tanstack-query-inlined-keys": tanstackQueryInlinedKeys,
+    "tanstack-query-prefer-query-options": tanstackQueryPreferQueryOptions,
+    "vitest-no-incompatible-angular-testing-apis": vitestNoIncompatibleAngularTestingApis,
   },
 }) satisfies Plugin;
 

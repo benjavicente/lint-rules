@@ -1,6 +1,6 @@
 {
   "name": "@benjavicente/lint-angular",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Oxlint/ESLint-compatible rules for Angular.",
   "keywords": [
     "angular",

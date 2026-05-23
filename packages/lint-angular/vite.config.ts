@@ -4,7 +4,6 @@ export default defineConfig({
   fmt: {},
   lint: {
     ignorePatterns: ["dist/**"],
-    options: { typeAware: true, typeCheck: true },
   },
   pack: {
     deps: { skipNodeModulesBundle: true },
